@@ -1,0 +1,6 @@
+# Streamlit secrets (contains sensitive API keys and credentials)
+.streamlit/secrets.toml
+
+# Test files
+tests/raw-test-data/
+*.log
