@@ -19,27 +19,27 @@ def load_css():
 
     /* --- Metric/Stat Cards --- */
     div[data-testid="metric-container"] {
-        background-color: #FFFFFF;
-        border: 1px solid #F0F2F6;
+        background-color: var(--secondary-background-color);
+        border: 1px solid rgba(128, 128, 128, 0.1);
         padding: 20px;
         border-radius: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         transition: all 0.2s ease-in-out;
     }
 
     div[data-testid="metric-container"]:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        border-color: #E0E3E9;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     }
 
     div[data-testid="metric-container"] label {
-        color: #64748B; /* Slate-500 */
+        color: var(--text-color);
+        opacity: 0.7;
         font-weight: 500;
     }
 
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        color: #1E293B; /* Slate-800 */
+        color: var(--text-color);
         font-weight: 700;
     }
 
@@ -47,26 +47,24 @@ def load_css():
     h1, h2, h3 {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
-        color: #0F172A; /* Slate-900 */
+        color: var(--text-color);
         letter-spacing: -0.02em;
     }
 
 
-
     /* --- Custom Content Card --- */
     .css-card {
-        background-color: #FFFFFF;
+        background-color: var(--secondary-background-color);
         padding: 24px;
         border-radius: 16px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         margin-bottom: 24px;
-        border: 1px solid #F1F5F9;
+        border: 1px solid rgba(128, 128, 128, 0.1);
     }
 
     /* --- Sidebar --- */
     section[data-testid="stSidebar"] {
-        background-color: #F8FAFC; /* Slate-50 */
-        border-right: 1px solid #E2E8F0;
+        /* Let Streamlit handle sidebar background to support dark mode naturally */
     }
 
     div[data-testid="stSidebarNav"] {
