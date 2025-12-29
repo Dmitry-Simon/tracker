@@ -5,7 +5,7 @@ CONFIG_PATH = ".streamlit/config.toml"
 
 LIGHT_THEME = {
     "base": "light",
-    "primaryColor": "#2980b9",
+    "primaryColor": "#FF4B4B",
     "backgroundColor": "#FFFFFF",
     "secondaryBackgroundColor": "#F0F2F6",
     "textColor": "#262730",
@@ -14,9 +14,8 @@ LIGHT_THEME = {
 
 DARK_THEME = {
     "base": "dark",
-    "primaryColor": "#2980b9", 
+    "primaryColor": "#FF4B4B", 
     "font": "sans serif"
-    # We purposefully OMIT background/text colors to let Streamlit's native Dark Mode handle it
 }
 
 def get_current_theme():

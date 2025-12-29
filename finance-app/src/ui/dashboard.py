@@ -24,60 +24,34 @@ def render_dashboard(filters):
         st.info(f"No transactions found for {period_label}.")
         return
 
-    # Convert to DataFrame
     df = pd.DataFrame(transactions)
-    
-    # Ensure correct data types
     df['amount'] = pd.to_numeric(df['amount'])
     df['date'] = pd.to_datetime(df['date'])
-    
-    # Fill missing categories if 'category' column exists, otherwise create it
-    if 'category' not in df.columns:
-        df['category'] = "Uncategorized"
-    else:
-        df['category'] = df['category'].fillna("Uncategorized")
+    df['category'] = df['category'].fillna("Uncategorized") if 'category' in df.columns else "Uncategorized"
+    df['spender'] = df['spender'].fillna("Joint") if 'spender' in df.columns else "Joint"
         
-    if 'spender' not in df.columns:
-        df['spender'] = "Joint"
-    else:
-        df['spender'] = df['spender'].fillna("Joint")
-        
-    # 2. KPI Metrics
-    # Income: Strict Category Filter
+    # 2. KPI Metrics Calculations
     INCOME_CATEGORIES = ['Salary', 'Income', 'Benefits', 'Interest']
-    # Excluded from Expenses (Payoffs to avoid double counting)
     IGNORE_CATS = ['Credit Card Payoff']
     
-    # Calculate Income (Sum of positive amounts in Income Categories)
     income = df[df['category'].isin(INCOME_CATEGORIES)]['amount'].sum()
-    
-    # Calculate Expenses (Sum of ALL transactions NOT in Income Categories AND NOT Ignored)
-    # This automatically handles Refunds (positive amounts in non-income categories)
-    # as they will reduce the negative sum.
-    expenses_net = df[
-        (~df['category'].isin(INCOME_CATEGORIES)) & 
-        (~df['category'].isin(IGNORE_CATS))
-    ]['amount'].sum()
-    
-    # Expenses should be displayed as a positive number (Absolute)
-    # Note: expenses_net is typically negative.
-    
+    expenses_net = df[(~df['category'].isin(INCOME_CATEGORIES)) & (~df['category'].isin(IGNORE_CATS))]['amount'].sum()
     net_savings = income + expenses_net
+    savings_rate = (net_savings / income * 100) if income > 0 else 0
     
-    # Savings Rate
-    savings_rate = 0
-    if income > 0:
-        savings_rate = (net_savings / income) * 100
+    # Metrics in a more spaced layout
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        c1, c2 = st.columns(2)
+        c1.metric("Total Income", f"₪{income:,.2f}")
+        c2.metric("Total Expenses", f"₪{abs(expenses_net):,.2f}", delta="-", delta_color="inverse")
+    with m_col2:
+        c3, c4 = st.columns(2)
+        c3.metric("Net Savings", f"₪{net_savings:,.2f}")
+        c4.metric("Savings Rate", f"{savings_rate:.1f}%")
     
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Income", f"₪{income:,.2f}", delta_color="normal")
-    col2.metric("Total Expenses", f"₪{abs(expenses_net):,.2f}", delta="-", delta_color="inverse")
-    col3.metric("Net Savings", f"₪{net_savings:,.2f}", delta_color="normal")
-    col4.metric("Savings Rate", f"{savings_rate:.1f}%", delta=None)
+    styles.divider()
     
-    st.markdown("---")
-    
-    # Selected Category State
     selected_category = None
 
     # 3. Visualizations
@@ -85,71 +59,47 @@ def render_dashboard(filters):
     
     with col_charts1:
         with styles.card():
-            st.subheader("Expenses by Category")
-            # Filter for expenses only AND exclude payofs
-            df_expenses = df[
-                (df['amount'] < 0) & 
-                (~df['category'].isin(IGNORE_CATS))
-            ].copy()
+            st.subheader("📊 Expenses by Category")
+            df_expenses = df[(df['amount'] < 0) & (~df['category'].isin(IGNORE_CATS))].copy()
             
             if not df_expenses.empty:
                 df_expenses['abs_amount'] = df_expenses['amount'].abs()
-                # Group by category
                 cat_breakdown = df_expenses.groupby('category')['abs_amount'].sum().reset_index()
-                
-                # Interactive Selection
                 select_category = alt.selection_point(fields=['category'], name="category_select")
                 
-                # Altair Donut Chart
-                base = alt.Chart(cat_breakdown).encode(
-                    theta=alt.Theta("abs_amount", stack=True)
-                )
-                
-                pie = base.mark_arc(outerRadius=120, innerRadius=80).encode(
-                    color=alt.Color("category"),
+                pie = alt.Chart(cat_breakdown).mark_arc(outerRadius=120, innerRadius=80).encode(
+                    theta=alt.Theta("abs_amount", stack=True),
+                    color=alt.Color("category", scale=alt.Scale(scheme='tableau10')),
                     order=alt.Order("abs_amount", sort="descending"),
                     tooltip=["category", alt.Tooltip("abs_amount", format=",.2f")],
                     opacity=alt.condition(select_category, alt.value(1), alt.value(0.3))
                 ).add_params(select_category)
                 
-                # Render and Capture Selection (Text layer removed due to Streamlit limitation on interactive layered charts)
                 chart_event = st.altair_chart(pie, use_container_width=True, on_select="rerun")
-                
-                # Extract Selection
                 if len(chart_event.selection.category_select) > 0:
-                    # Returns list of dicts: [{'category': 'Food'}]
                     selected_category = chart_event.selection.category_select[0]['category']
-
             else:
                 st.caption("No expenses recorded this period.")
 
     with col_charts2:
         with styles.card():
-            st.subheader("Balance Trend")
-            
-            chart_data = None
-            x_axis = ""
-            
-            # Filter source for chart to avoid double dips
+            st.subheader("📈 Balance Trend")
             df_chart_source = df[~df['category'].isin(IGNORE_CATS)]
             
             if view_period == "Monthly":
-                # Daily trend
                 chart_data = df_chart_source.groupby('date')['amount'].sum().cumsum().reset_index()
                 x_axis = "date"
             else:
-                # Group by Month
                 df_chart_source['Month'] = df_chart_source['date'].dt.to_period('M').astype(str)
                 chart_data = df_chart_source.groupby('Month')['amount'].sum().reset_index()
                 x_axis = "Month"
 
-            # Altair Area Chart
             area = alt.Chart(chart_data).mark_area(
-                line={'color':'#2980b9'},
+                line={'color':'#FF4B4B'},
                 color=alt.Gradient(
                     gradient='linear',
-                    stops=[alt.GradientStop(color='#2980b9', offset=0),
-                           alt.GradientStop(color='rgba(41, 128, 185, 0.1)', offset=1)],
+                    stops=[alt.GradientStop(color='#FF4B4B', offset=0),
+                           alt.GradientStop(color='rgba(255, 75, 75, 0.1)', offset=1)],
                     x1=1, x2=1, y1=1, y2=0
                 )
             ).encode(
@@ -157,28 +107,28 @@ def render_dashboard(filters):
                 y=alt.Y('amount', title="Balance / Net Flow"),
                 tooltip=[x_axis, alt.Tooltip('amount', format=",.2f")]
             )
-            
             st.altair_chart(area, use_container_width=True)
 
     # 4. Detailed Transaction Table
     with styles.card():
-        st.subheader("Transaction Details")
+        st.subheader("🔍 Transaction Details")
         
         # Interactive Filter Banner
         if selected_category:
-            st.info(f"🔍 Filtering details by Category: **{selected_category}**")
+            st.info(f"Filtering by: **{selected_category}** (Click chart to clear)")
         
-        # Search Filter
-        search_term = st.text_input("🔍 Search Transactions", placeholder="Type to search description or category...")
+        # Search Filter Row
+        s_col1, s_col2 = st.columns([2, 1])
+        with s_col1:
+            search_term = st.text_input("Search", placeholder="Search description, category, or spender...", label_visibility="collapsed")
         
-        # Build display columns - include source tracking if available
+        # Build display columns
         base_cols = ['date', 'spender', 'description', 'category', 'amount']
         optional_cols = ['source_file', 'uploaded_from']
         display_cols = base_cols + [col for col in optional_cols if col in df.columns]
         
         display_df = df[display_cols].sort_values(by='date', ascending=False)
         
-        # Apply Category Filter if selected
         if selected_category:
             display_df = display_df[display_df['category'] == selected_category]
         
@@ -193,11 +143,12 @@ def render_dashboard(filters):
             display_df,
             use_container_width=True,
             column_config={
-                "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
-                "spender": st.column_config.TextColumn("Spender"),
-                "description": st.column_config.TextColumn("Description"),
-                "category": st.column_config.TextColumn("Category"),
-                "amount": st.column_config.NumberColumn("Amount", format="₪%.2f")
+                "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", width="small"),
+                "spender": st.column_config.TextColumn("Owner", width="small"),
+                "description": st.column_config.TextColumn("Description", width="large"),
+                "category": st.column_config.TextColumn("Category", width="medium"),
+                "amount": st.column_config.NumberColumn("Amount", format="₪%.2f", width="small")
             },
             hide_index=True
         )
+
