@@ -4,3 +4,13 @@
 # Test files
 tests/raw-test-data/
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.local
+
