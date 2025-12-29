@@ -141,11 +141,16 @@ class TransactionParser:
                         
                         if "isracard" in first_page_text.lower() or "ישראכרט" in first_page_text:
                              file_obj.seek(0)
-                             return self._parse_isracard_pdf(file_obj)
+                             df_result = self._parse_isracard_pdf(file_obj)
                         else:
                              # Default to One Zero for now if not explicitly Isracard
                              file_obj.seek(0)
-                             return self._parse_one_zero_pdf(file_obj)
+                             df_result = self._parse_one_zero_pdf(file_obj)
+                        
+                        # Add uploaded_from field
+                        if not df_result.empty:
+                            df_result['uploaded_from'] = filename
+                        return df_result
                 except Exception as e:
                     print(f"Error detecting PDF type for {filename}: {e}")
                     return pd.DataFrame()
@@ -165,21 +170,26 @@ class TransactionParser:
                 # 1. One Zero Excel (New - Prioritize)
                 if "תאריך תנועה" in content_str and "סכום פעולה" in content_str:
                     file_obj.seek(0)
-                    return self._parse_one_zero_excel(file_obj)
+                    df_result = self._parse_one_zero_excel(file_obj)
                 
                 # 2. Max Finance
                 elif "שם בית העסק" in content_str and "4 ספרות אחרונות" in content_str:
                     file_obj.seek(0)
-                    return self._parse_max_finance(file_obj)
+                    df_result = self._parse_max_finance(file_obj)
                 
                 # 3. Isracard
                 elif "תאריך רכישה" in content_str or "שם בית עסק" in content_str:
                     file_obj.seek(0)
-                    return self._parse_isracard(file_obj)
+                    df_result = self._parse_isracard(file_obj)
                 
                 else:
                     print(f"Unknown CSV format for {filename}")
                     return pd.DataFrame()
+                    
+                # Add uploaded_from field
+                if not df_result.empty:
+                    df_result['uploaded_from'] = filename
+                return df_result
 
             except Exception as e:
                 print(f"Error reading {filename}: {e}")
@@ -188,6 +198,7 @@ class TransactionParser:
         except Exception as e:
             print(f"Critical error parsing {filename}: {e}")
             return pd.DataFrame()
+
 
     def _parse_one_zero_pdf(self, file_obj):
         """
@@ -705,11 +716,25 @@ class TransactionParser:
             for _, row in df.iterrows():
                 if pd.isna(row[desc_col]): continue
 
-                amount = self.clean_amount(row.get(amount_col, 0))
-                final_amount = -1 * abs(amount) # Expense by default
+                raw_amount = self.clean_amount(row.get(amount_col, 0))
                 
-                if "ביטול" in str(row.get('הערות', '')):
-                    final_amount = abs(amount)
+                # Enhanced refund detection
+                notes = str(row.get('הערות', '')).lower()
+                desc_lower = str(row[desc_col]).lower()
+                
+                # Check for refund indicators in notes or description
+                is_refund = (
+                    "ביטול" in notes or 
+                    "זיכוי" in notes or
+                    "זיכוי" in desc_lower or
+                    "החזר" in notes or
+                    "החזר" in desc_lower
+                )
+                
+                if is_refund:
+                    final_amount = abs(raw_amount)  # Refunds are positive
+                else:
+                    final_amount = -1 * abs(raw_amount)  # Expenses are negative
 
                 date_str = self.parse_date(str(row[date_col]))
                 

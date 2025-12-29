@@ -15,11 +15,26 @@ def render_sidebar():
             'current_month': int
         }
     """
+    
+    # Theme Toggle
+    from src.ui import theme_manager
+    current_theme = theme_manager.get_current_theme()
+    
+    # Icon based on NEXT state (e.g. if Light, show Moon to go Dark)
+    btn_label = "🌙 Dark Mode" if current_theme == "light" else "☀️ Light Mode"
+    
+    if st.sidebar.button(btn_label, use_container_width=True):
+        theme_manager.toggle_theme()
+        st.rerun()
+        
+    st.sidebar.divider()
+
     # --- 1. Main Navigation ---
     st.sidebar.title("Navigation")
+    
     selected_view = st.sidebar.pills(
         "Go to",
-        ["Dashboard", "Data Editor", "Upload Data", "AI Assistant"],
+        ["Dashboard", "Data Editor", "Upload Data"],
         default="Dashboard",
         selection_mode="single",
         label_visibility="collapsed"

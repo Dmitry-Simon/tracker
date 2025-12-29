@@ -66,10 +66,10 @@ def check_transaction_exists(transaction: dict) -> bool:
     doc = doc_ref.get() 
     return doc.exists
 
-def add_transaction(transaction: dict) -> bool:
+def add_transaction(transaction: dict) -> str:
     """
-    Adds transaction to Firestore if it doesn't exist.
-    Returns True if added, False if skipped (duplicate).
+    Adds or updates transaction in Firestore.
+    Returns 'added' if new, 'updated' if metadata changed, 'skipped' if identical.
     """
     db = get_db()
     
@@ -85,19 +85,30 @@ def add_transaction(transaction: dict) -> bool:
     doc = doc_ref.get()
     
     if doc.exists:
-        return False
+        # Check if uploaded_from needs updating
+        existing_data = doc.to_dict()
+        new_uploaded_from = transaction.get('uploaded_from')
+        
+        if new_uploaded_from and existing_data.get('uploaded_from') != new_uploaded_from:
+            # Update only the uploaded_from field
+            doc_ref.update({'uploaded_from': new_uploaded_from})
+            return 'updated'
+        else:
+            return 'skipped'
     
-    # Prepare data
+    # Prepare data for new transaction
     data = transaction.copy()
     data['_id'] = hash_id
-    data['is_fixed'] = data.get('is_fixed', False) # Default
+    # Remove is_fixed field if present (legacy cleanup)
+    data.pop('is_fixed', None)
     if 'category' not in data:
         data['category'] = 'Uncategorized'
         
     data['uploaded_at'] = firestore.SERVER_TIMESTAMP
     
     doc_ref.set(data)
-    return True
+    return 'added'
+
 
 def get_recent_transactions(limit=50):
     db = get_db()

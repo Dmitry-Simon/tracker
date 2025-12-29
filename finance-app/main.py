@@ -20,6 +20,3 @@ elif view == "Data Editor":
 
 elif view == "Upload Data":
     upload.render_upload()
-
-elif view == "AI Assistant":
-    ai_assistant.render_ai_assistant()

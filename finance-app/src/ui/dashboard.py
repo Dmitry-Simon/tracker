@@ -171,7 +171,12 @@ def render_dashboard(filters):
         # Search Filter
         search_term = st.text_input("🔍 Search Transactions", placeholder="Type to search description or category...")
         
-        display_df = df[['date', 'spender', 'description', 'category', 'amount']].sort_values(by='date', ascending=False)
+        # Build display columns - include source tracking if available
+        base_cols = ['date', 'spender', 'description', 'category', 'amount']
+        optional_cols = ['source_file', 'uploaded_from']
+        display_cols = base_cols + [col for col in optional_cols if col in df.columns]
+        
+        display_df = df[display_cols].sort_values(by='date', ascending=False)
         
         # Apply Category Filter if selected
         if selected_category:
