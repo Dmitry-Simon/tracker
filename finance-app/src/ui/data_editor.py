@@ -212,7 +212,11 @@ def render_data_editor(filters):
                 for idx, tx in enumerate(group):
                     with cols[idx]:
                         # Description might be long
-                        st.info(f"{tx['description']}\n\nSpender: {tx.get('spender', 'Unknown')}\nCategory: {tx.get('category', 'Uncategorized')}")
+                        st.info(
+                            f"**{tx['description']}**\n\n"
+                            f"📅 {tx['date']} | 💰 ₪{tx['amount']:.2f}\n"
+                            f"👤 {tx.get('spender', 'Unknown')} | 🏷️ {tx.get('category', 'Uncategorized')}"
+                        )
                         
                         if st.button(f"🗑️ Delete", key=f"del_{tx['_id']}"):
                             if db.delete_transaction(tx['_id']):
