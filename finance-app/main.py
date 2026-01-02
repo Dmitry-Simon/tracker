@@ -1,5 +1,5 @@
 import streamlit as st
-from src.ui import sidebar, dashboard, data_editor, upload, ai_assistant, styles
+from src.ui import sidebar, dashboard, data_editor, upload, ai_assistant, ai_summary, styles
 
 st.set_page_config(page_title="Finance Tracker", layout="wide", page_icon="💸")
 
@@ -14,6 +14,9 @@ view = filters["selected_view"]
 # 2. Main Content Routing
 if view == "Dashboard":
     dashboard.render_dashboard(filters)
+
+elif view == "AI Summary":
+    ai_summary.render_ai_summary(filters)
 
 elif view == "Data Editor":
     data_editor.render_data_editor(filters)

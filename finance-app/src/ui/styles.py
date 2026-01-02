@@ -206,8 +206,46 @@ def load_css():
         height: 1px !important;
     }
 
+    /* --- AI Summary Specific Styles --- */
+    .ai-insight-card {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%);
+        border-left: 3px solid #6366F1;
+        padding: 16px;
+        border-radius: 12px;
+        margin: 12px 0;
+        transition: transform 0.2s ease;
+    }
+    
+    .ai-insight-card:hover {
+        transform: translateX(4px);
+    }
+    
+    .anomaly-highlight {
+        background: rgba(255, 75, 75, 0.05);
+        border: 1px solid rgba(255, 75, 75, 0.2);
+        border-radius: 8px;
+        padding: 8px;
+    }
+    
+    .recommendation-box {
+        background: rgba(34, 197, 94, 0.05);
+        border-left: 3px solid #22C55E;
+        padding: 12px;
+        border-radius: 8px;
+        margin: 8px 0;
+    }
+    
+    /* AI Summary header gradient */
+    .ai-summary-header {
+        background: linear-gradient(90deg, #6366F1 0%, #EC4899 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
     </style>
     """, unsafe_allow_html=True)
+
 
 
 import contextlib

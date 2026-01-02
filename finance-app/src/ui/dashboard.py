@@ -31,24 +31,29 @@ def render_dashboard(filters):
     df['spender'] = df['spender'].fillna("Joint") if 'spender' in df.columns else "Joint"
         
     # 2. KPI Metrics Calculations
-    INCOME_CATEGORIES = ['Salary', 'Income', 'Benefits', 'Interest']
-    IGNORE_CATS = ['Credit Card Payoff']
+    from src import utils
+    metrics = utils.calculate_metrics(transactions)
     
-    income = df[df['category'].isin(INCOME_CATEGORIES)]['amount'].sum()
-    expenses_net = df[(~df['category'].isin(INCOME_CATEGORIES)) & (~df['category'].isin(IGNORE_CATS))]['amount'].sum()
-    net_savings = income + expenses_net
+    income = metrics['income']
+    expenses_net = metrics['expenses']
+    savings = metrics['savings']
+    net_savings = metrics['net']
     savings_rate = (net_savings / income * 100) if income > 0 else 0
     
-    # Metrics in a more spaced layout
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        c1, c2 = st.columns(2)
-        c1.metric("Total Income", f"₪{income:,.2f}")
-        c2.metric("Total Expenses", f"₪{abs(expenses_net):,.2f}", delta="-", delta_color="inverse")
-    with m_col2:
-        c3, c4 = st.columns(2)
-        c3.metric("Net Savings", f"₪{net_savings:,.2f}")
-        c4.metric("Savings Rate", f"{savings_rate:.1f}%")
+    # Metrics in a 2x2 layout
+    row1_col1, row1_col2 = st.columns(2)
+    row2_col1, row2_col2 = st.columns(2)
+    
+    with row1_col1:
+        st.metric("💰 Total Income", f"₪{income:,.2f}")
+    with row1_col2:
+        st.metric("💸 Total Expenses", f"₪{expenses_net:,.2f}", delta="-", delta_color="inverse")
+    with row2_col1:
+        st.metric("🏦 Savings", f"₪{savings:,.2f}", help="Amount transferred to savings accounts")
+    with row2_col2:
+        net_color = "normal" if net_savings >= 0 else "inverse"
+        st.metric("📊 Net Savings", f"₪{net_savings:,.2f}", delta=f"{savings_rate:.1f}%", delta_color=net_color)
+
     
     styles.divider()
     
@@ -60,7 +65,9 @@ def render_dashboard(filters):
     with col_charts1:
         with styles.card():
             st.subheader("📊 Expenses by Category")
+            IGNORE_CATS = ['Credit Card Payoff']
             df_expenses = df[(df['amount'] < 0) & (~df['category'].isin(IGNORE_CATS))].copy()
+
             
             if not df_expenses.empty:
                 df_expenses['abs_amount'] = df_expenses['amount'].abs()

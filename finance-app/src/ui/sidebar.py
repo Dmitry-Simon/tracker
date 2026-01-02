@@ -29,41 +29,58 @@ def render_sidebar():
         
     st.sidebar.divider()
 
-    # --- 1. Main Navigation ---
+    current_year = datetime.now().year
+    current_month = datetime.now().month
+
+    # --- 1. Dashboard Settings (Period Type First) ---
+
+    st.sidebar.header("Dashboard Settings")
+    
+    # View Period Selector - Moved up so Navigation can react to it
+    view_period = st.sidebar.pills(
+        "Period Type", 
+        ["Monthly", "Quarterly", "Half Year", "Yearly"],
+        default=st.session_state.get('view_period', 'Monthly'),
+        selection_mode="single",
+        key="period_selector_pills"
+    )
+    if not view_period:
+        view_period = st.session_state.get('view_period', 'Monthly')
+    
+    # Sync with session state immediately
+    st.session_state['view_period'] = view_period
+
+    st.sidebar.divider()
+
+    # --- 2. Main Navigation ---
     st.sidebar.title("Navigation")
+    
+    base_views = ["Dashboard", "Data Editor", "Upload Data"]
+    
+    # Only show AI Summary for Monthly/Quarterly (cost optimization)
+    if view_period in ["Monthly", "Quarterly"]:
+        nav_options = ["Dashboard", "AI Summary", "Data Editor", "Upload Data"]
+    else:
+        nav_options = base_views
     
     selected_view = st.sidebar.pills(
         "Go to",
-        ["Dashboard", "Data Editor", "Upload Data"],
+        nav_options,
         default="Dashboard",
         selection_mode="single",
         label_visibility="collapsed"
     )
     if not selected_view:
         selected_view = "Dashboard"
-    
+
     st.sidebar.divider()
 
-    # --- 2. Dashboard Settings ---
-    st.sidebar.header("Dashboard Filters")
-    
-    current_year = datetime.now().year
-    current_month = datetime.now().month
-
-    # View Period Selector
-    view_period = st.sidebar.pills(
-        "Period Type", 
-        ["Monthly", "Quarterly", "Half Year", "Yearly"],
-        default="Monthly",
-        selection_mode="single"
-    )
-    if not view_period:
-        view_period = "Monthly" # Fallback
-
+    # --- 3. Time Selection ---
     st.sidebar.markdown("### Time Selection")
+
     
     # Year Selector (Full Width)
-    selected_year = st.sidebar.selectbox("Year", range(current_year - 2, current_year + 2), index=2)
+    selected_year = st.sidebar.selectbox("Year", range(current_year - 2, current_year + 2), index=1)
 
     # Variables for return
     start_date = ""
@@ -154,3 +171,5 @@ def render_sidebar():
         'selected_year': selected_year,
         'selected_month': selected_month
     }
+
+

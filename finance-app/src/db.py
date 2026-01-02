@@ -7,6 +7,7 @@ import json
 import re
 
 # Initialize Firebase app (singleton)
+MOCK_MODE = False
 if not firebase_admin._apps:
     # Use secrets for credentials
     if "gcp_service_account" in st.secrets:
@@ -18,10 +19,13 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
     else:
-        # Fallback or explicit path if needed (though constraint said via secrets usually)
-        print("Warning: No secrets found for Firebase.")
+        # Fallback to Mock Mode if no secrets found
+        print("Warning: No secrets found for Firebase. Switching to MOCK_MODE.")
+        MOCK_MODE = True
 
 def get_db():
+    if MOCK_MODE:
+        return None
     return firestore.client()
 
 def normalize_description(description: str) -> str:
@@ -71,8 +75,6 @@ def add_transaction(transaction: dict) -> str:
     Adds or updates transaction in Firestore.
     Returns 'added' if new, 'updated' if metadata changed, 'skipped' if identical.
     """
-    db = get_db()
-    
     # Generate Hash
     hash_id = generate_hash_id(
         transaction['date'],
@@ -80,6 +82,39 @@ def add_transaction(transaction: dict) -> str:
         transaction['description'],
         transaction.get('ref_id')  # Pass optional reference ID
     )
+    
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            
+            existing = next((tx for tx in data if tx['_id'] == hash_id), None)
+            
+            if existing:
+                new_uploaded_from = transaction.get('uploaded_from')
+                if new_uploaded_from and existing.get('uploaded_from') != new_uploaded_from:
+                    existing['uploaded_from'] = new_uploaded_from
+                    with open('mock_db.json', 'w') as f:
+                        json.dump(data, f, indent=4)
+                    return 'updated'
+                else:
+                    return 'skipped'
+            
+            # Prepare data for new transaction
+            new_tx = transaction.copy()
+            new_tx['_id'] = hash_id
+            if 'category' not in new_tx:
+                new_tx['category'] = 'Uncategorized'
+            new_tx['uploaded_at'] = datetime.now().isoformat()
+            
+            data.append(new_tx)
+            with open('mock_db.json', 'w') as f:
+                json.dump(data, f, indent=4)
+            return 'added'
+        except:
+            return 'skipped'
+
+    db = get_db()
     
     doc_ref = db.collection('transactions').document(hash_id)
     doc = doc_ref.get()
@@ -111,6 +146,13 @@ def add_transaction(transaction: dict) -> str:
 
 
 def get_recent_transactions(limit=50):
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            return sorted(data, key=lambda x: x['date'], reverse=True)[:limit]
+        except:
+            return []
     db = get_db()
     docs = db.collection('transactions').order_by('date', direction=firestore.Query.DESCENDING).limit(limit).stream()
     return [d.to_dict() for d in docs]
@@ -120,6 +162,20 @@ def get_transactions_by_range(start_date: str, end_date: str):
     Fetches transactions within a date range (inclusive).
     start_date and end_date should be strings in YYYY-MM-DD format.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            # Filter by date
+            filtered = [
+                tx for tx in data 
+                if start_date <= tx['date'] <= end_date
+            ]
+            return filtered
+        except Exception as e:
+            print(f"Error reading mock_db.json: {e}")
+            return []
+
     db = get_db()
     
     docs = db.collection('transactions') \
@@ -147,6 +203,20 @@ def update_transaction(transaction_id: str, updates: dict) -> bool:
     """
     Updates a specific transaction document in Firestore.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            for tx in data:
+                if tx['_id'] == transaction_id:
+                    tx.update(updates)
+                    break
+            with open('mock_db.json', 'w') as f:
+                json.dump(data, f, indent=4)
+            return True
+        except:
+            return False
+
     try:
         db = get_db()
         doc_ref = db.collection('transactions').document(transaction_id)
@@ -160,6 +230,14 @@ def get_uncategorized_transactions(limit=100):
     """
     Fetches raw transactions that need categorization.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            return [tx for tx in data if tx.get('category') == 'Uncategorized'][:limit]
+        except:
+            return []
+
     db = get_db()
     docs = db.collection('transactions') \
              .where('category', '==', 'Uncategorized') \
@@ -210,6 +288,17 @@ def delete_transaction(transaction_id: str) -> bool:
     """
     Deletes a specific transaction from Firestore.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            data = [tx for tx in data if tx['_id'] != transaction_id]
+            with open('mock_db.json', 'w') as f:
+                json.dump(data, f, indent=4)
+            return True
+        except:
+            return False
+
     try:
         db = get_db()
         db.collection('transactions').document(transaction_id).delete()
@@ -227,12 +316,17 @@ def find_potential_duplicates():
     
     Returns a list of groups. Each group is a list of duplicate transactions.
     """
-    db = get_db()
-    
-    # Fetch ALL transactions (no date filter)
-    docs = db.collection('transactions').stream()
-             
-    transactions = [doc.to_dict() for doc in docs]
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                transactions = json.load(f)
+        except:
+            return []
+    else:
+        db = get_db()
+        # Fetch ALL transactions (no date filter)
+        docs = db.collection('transactions').stream()
+        transactions = [doc.to_dict() for doc in docs]
     
     # Group by (date, abs(amount))
     # Key: (date, abs(amount)), Value: list of txs
@@ -279,6 +373,14 @@ def delete_all_transactions():
     Deletes ALL documents in the transactions collection.
     Warning: This cannot be undone.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'w') as f:
+                json.dump([], f)
+            return 0 # Or actual count if needed
+        except:
+            return 0
+
     db = get_db()
     docs = db.collection('transactions').stream()
     count = 0
@@ -301,6 +403,14 @@ def get_uncategorized_count():
     """
     Returns the total number of uncategorized transactions.
     """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            return sum(1 for tx in data if tx.get('category') == 'Uncategorized')
+        except:
+            return 0
+
     db = get_db()
     try:
         # standard firestore count query
