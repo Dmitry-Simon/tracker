@@ -120,13 +120,30 @@ def add_transaction(transaction: dict) -> str:
     doc = doc_ref.get()
     
     if doc.exists:
-        # Check if uploaded_from needs updating
+        # Check if any fields need updating (enrichment)
         existing_data = doc.to_dict()
-        new_uploaded_from = transaction.get('uploaded_from')
+        updates = {}
         
-        if new_uploaded_from and existing_data.get('uploaded_from') != new_uploaded_from:
-            # Update only the uploaded_from field
-            doc_ref.update({'uploaded_from': new_uploaded_from})
+        # Fields that can be enriched on existing transactions
+        enrichable_fields = [
+            'uploaded_from',
+            'bank_category',      # סוג פעולה - bank's categorization
+            'transaction_type',   # חיוב/זיכוי - debit/credit indicator
+            'spender',            # Who made the transaction
+        ]
+        
+        for field in enrichable_fields:
+            new_val = transaction.get(field)
+            existing_val = existing_data.get(field)
+            
+            # Update if new value exists and either:
+            # 1. Existing value is missing/None, OR
+            # 2. Field is 'uploaded_from' and values differ (existing behavior)
+            if new_val and (existing_val is None or field == 'uploaded_from' and existing_val != new_val):
+                updates[field] = new_val
+        
+        if updates:
+            doc_ref.update(updates)
             return 'updated'
         else:
             return 'skipped'
@@ -326,10 +343,14 @@ def find_potential_duplicates():
     """
     Finds potential duplicates based on:
     1. Same Date
-    2. Same Amount
-    3. Similarity > 0.6 in Description
+    2. Same Amount (or within 5% tolerance)
+    3. Description Similarity > 60%
+    4. Cross-source awareness (Bank + CC overlap)
     
-    Returns a list of groups. Each group is a list of duplicate transactions.
+    Returns a list of groups. Each group is a dict with:
+    - 'transactions': list of duplicate transactions
+    - 'confidence': float 0.0-1.0
+    - 'reason': string explaining why flagged
     """
     if MOCK_MODE:
         try:
@@ -339,18 +360,14 @@ def find_potential_duplicates():
             return []
     else:
         db = get_db()
-        # Fetch ALL transactions (no date filter)
         docs = db.collection('transactions').stream()
         transactions = [doc.to_dict() for doc in docs]
     
     # Group by (date, abs(amount))
-    # Key: (date, abs(amount)), Value: list of txs
     grouped = {}
     for tx in transactions:
         amount = tx.get('amount', 0)
-        # Use abs(amount) to catch +50 vs -50
         key = (tx.get('date'), abs(amount))
-        
         if key not in grouped:
             grouped[key] = []
         grouped[key].append(tx)
@@ -360,28 +377,209 @@ def find_potential_duplicates():
     for key, group in grouped.items():
         if len(group) < 2:
             continue
-            
-        # Check descriptions
-        # Simple N^2 comparison for small groups (usually 2-3 items)
-        # We assume if A matches B, they are duplicates.
-        # We return the whole group if any similarity is found to let the user decide.
         
-        has_similarity = False
-        descriptions = [t.get('description', '') for t in group]
-        
-        for i in range(len(descriptions)):
-            for j in range(i + 1, len(descriptions)):
-                ratio = difflib.SequenceMatcher(None, descriptions[i], descriptions[j]).ratio()
-                if ratio > 0.6: # 60% similarity threshold
-                    has_similarity = True
-                    break
-            if has_similarity:
-                break
-        
-        if has_similarity:
-            potential_dupes.append(group)
-            
+        # Check all pairs in the group
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                tx1, tx2 = group[i], group[j]
+                
+                # Check explicit ignore list
+                if tx2['_id'] in tx1.get('not_duplicate_of', []) or \
+                   tx1['_id'] in tx2.get('not_duplicate_of', []):
+                    continue
+                
+                confidence, reason = calculate_duplicate_confidence(tx1, tx2)
+                
+                if confidence >= 0.6:
+                    # Check if this pair belongs to existing group
+                    existing_group = None
+                    for pg in potential_dupes:
+                        if tx1 in pg['transactions'] or tx2 in pg['transactions']:
+                            existing_group = pg
+                            break
+                    
+                    if existing_group:
+                        if tx1 not in existing_group['transactions']:
+                            existing_group['transactions'].append(tx1)
+                        if tx2 not in existing_group['transactions']:
+                            existing_group['transactions'].append(tx2)
+                        if confidence > existing_group['confidence']:
+                            existing_group['confidence'] = confidence
+                            existing_group['reason'] = reason
+                    else:
+                        potential_dupes.append({
+                            'transactions': [tx1, tx2],
+                            'confidence': confidence,
+                            'reason': reason
+                        })
+    
+    potential_dupes.sort(key=lambda x: x['confidence'], reverse=True)
     return potential_dupes
+
+def mark_as_not_duplicate(tx_ids: list[str]) -> bool:
+    """
+    Marks a list of transactions as explicitly NOT duplicates of each other.
+    """
+    if len(tx_ids) < 2: return True
+    
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                data = json.load(f)
+            
+            id_set = set(tx_ids)
+            for tx in data:
+                if tx['_id'] in id_set:
+                    others = list(id_set - {tx['_id']})
+                    current = tx.get('not_duplicate_of', [])
+                    tx['not_duplicate_of'] = list(set(current + others))
+            
+            with open('mock_db.json', 'w') as f:
+                json.dump(data, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Mock update failed: {e}")
+            return False
+
+    try:
+        db = get_db()
+        batch = db.batch()
+        
+        for tx_id in tx_ids:
+            others = [oid for oid in tx_ids if oid != tx_id]
+            ref = db.collection('transactions').document(tx_id)
+            batch.update(ref, {"not_duplicate_of": firestore.ArrayUnion(others)})
+        
+        batch.commit()
+        return True
+    except Exception as e:
+        print(f"Error marking not duplicates: {e}")
+        return False
+
+
+
+def calculate_duplicate_confidence(tx1: dict, tx2: dict) -> tuple:
+    """
+    Calculates confidence score (0.0-1.0) that two transactions are duplicates.
+    Returns (confidence: float, reason: str).
+    """
+    score = 0.0
+    reasons = []
+    
+    # 1. Same date: +30%
+    if tx1.get('date') == tx2.get('date'):
+        score += 0.30
+        reasons.append("same date")
+    
+    # 2. Amount comparison
+    amt1 = abs(float(tx1.get('amount', 0)))
+    amt2 = abs(float(tx2.get('amount', 0)))
+    
+    if amt1 == amt2:
+        score += 0.35
+        reasons.append("exact amount")
+    elif amt1 > 0 and abs(amt1 - amt2) / amt1 < 0.05:
+        score += 0.25
+        reasons.append("amount ~5%")
+    
+    # 3. Description similarity
+    desc1 = normalize_description(tx1.get('description', ''))
+    desc2 = normalize_description(tx2.get('description', ''))
+    desc_sim = difflib.SequenceMatcher(None, desc1, desc2).ratio()
+    
+    if desc_sim > 0.8:
+        score += 0.25
+        reasons.append(f"desc {int(desc_sim*100)}%")
+    elif desc_sim > 0.6:
+        score += 0.15
+        reasons.append(f"desc {int(desc_sim*100)}%")
+    
+    # 4. Cross-source bonus
+    overlap_type = is_bank_cc_overlap(tx1, tx2)
+    if overlap_type:
+        score += 0.20
+        reasons.append(overlap_type)
+    
+    # 5. Same spender
+    if tx1.get('spender') == tx2.get('spender') and tx1.get('spender'):
+        score += 0.05
+        reasons.append("same owner")
+    
+    return (min(score, 1.0), "; ".join(reasons))
+
+
+def is_bank_cc_overlap(tx1: dict, tx2: dict) -> str:
+    """
+    Checks if two transactions represent Bank + Credit Card overlap.
+    Returns descriptive string if true, None otherwise.
+    """
+    bank_sources = ['OneZero_Table', 'OneZero_Excel']
+    cc_sources = ['Isracard', 'Max_Card', 'Isracard_PDF_Fixed']
+    
+    src1 = tx1.get('source_file', '')
+    src2 = tx2.get('source_file', '')
+    cat1 = tx1.get('category', '')
+    cat2 = tx2.get('category', '')
+    
+    # Bank CC payoff vs CC statement
+    if src1 in bank_sources and src2 in cc_sources:
+        if cat1 == 'Credit Card Payoff':
+            return "bank↔cc overlap"
+    elif src2 in bank_sources and src1 in cc_sources:
+        if cat2 == 'Credit Card Payoff':
+            return "bank↔cc overlap"
+    
+    # Same source, different formats
+    if src1 in bank_sources and src2 in bank_sources and src1 != src2:
+        return "multi-format"
+    if src1 in cc_sources and src2 in cc_sources and src1 != src2:
+        return "multi-format"
+    
+    return None
+
+
+def check_for_near_duplicates(transaction: dict, threshold: float = 0.7) -> list:
+    """
+    Checks if a transaction has near-duplicates already in the database.
+    Used BEFORE inserting to warn the user.
+    
+    Returns: [{'existing': tx_dict, 'confidence': float, 'reason': str}, ...]
+    """
+    date = transaction.get('date')
+    if not date:
+        return []
+    
+    try:
+        dt = datetime.strptime(date, '%Y-%m-%d')
+        start = (dt - timedelta(days=3)).strftime('%Y-%m-%d')
+        end = (dt + timedelta(days=3)).strftime('%Y-%m-%d')
+    except:
+        return []
+    
+    existing_txs = get_transactions_by_range(start, end)
+    
+    matches = []
+    for existing in existing_txs:
+        confidence, reason = calculate_duplicate_confidence(transaction, existing)
+        if confidence >= threshold:
+            matches.append({
+                'existing': existing,
+                'confidence': confidence,
+                'reason': reason
+            })
+    
+    matches.sort(key=lambda x: x['confidence'], reverse=True)
+    return matches
+
+
+def mark_as_duplicate(transaction_id: str, duplicate_of_id: str) -> bool:
+    """
+    Marks a transaction as a duplicate of another.
+    """
+    return update_transaction(transaction_id, {
+        'duplicate_of': duplicate_of_id,
+        'is_duplicate': True
+    })
 
 def delete_all_transactions():
     """

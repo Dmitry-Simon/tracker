@@ -183,28 +183,79 @@ def render_data_editor(filters):
             if st.session_state["dupe_groups"]:
                 dupe_groups = st.session_state["dupe_groups"]
                 st.warning(f"Found {len(dupe_groups)} potential duplicate sets.")
-                for i, group in enumerate(dupe_groups):
-                    if len(group) < 2: continue
+                
+                for i, dupe_info in enumerate(dupe_groups):
+                    group = dupe_info.get('transactions', [])
+                    confidence = dupe_info.get('confidence', 0)
+                    reason = dupe_info.get('reason', 'Unknown')
+                    
+                    if len(group) < 2: 
+                        continue
+                    
+                    # Color-code based on confidence
+                    if confidence >= 0.9:
+                        conf_color = "🔴"  # High confidence
+                    elif confidence >= 0.7:
+                        conf_color = "🟡"  # Medium confidence
+                    else:
+                        conf_color = "🟢"  # Lower confidence
+                    
                     descs = [tx.get('description', '').strip() for tx in group]
                     is_collision = len(set(descs)) > 1
                     
-                    st.markdown(f"**Group {i+1}:** {group[0]['date']} | ₪{group[0]['amount']}")
-                    if is_collision:
-                        st.error("🚨 HASH COLLISION detected. Review carefully.")
+                    st.markdown(f"**{conf_color} Group {i+1}** ({int(confidence*100)}% confidence)")
+                    st.caption(f"📍 {reason}")
+                    st.markdown(f"📅 {group[0]['date']} | ₪{group[0]['amount']:.2f}")
                     
-                    if not is_collision:
+                    if is_collision:
+                        st.error("🚨 Different descriptions - review carefully!")
+                    
+                    # Batch actions
+                    col_actions = st.columns(3)
+                    with col_actions[0]:
+                        if st.button(f"🗑️ Keep First Only", key=f"keep_first_{i}"):
+                            for tx in group[1:]:  # Delete all except first
+                                db.delete_transaction(tx['_id'])
+                            # Remove this group from session state
+                            st.session_state["dupe_groups"].pop(i)
+                            st.rerun()
+                    with col_actions[1]:
                         if st.button(f"🗑️ Delete All {len(group)}", key=f"bulk_{i}"):
-                            for tx in group: db.delete_transaction(tx['_id'])
+                            for tx in group: 
+                                db.delete_transaction(tx['_id'])
+                            # Remove this group from session state
+                            st.session_state["dupe_groups"].pop(i)
+                            st.rerun()
+                    with col_actions[2]:
+                        if st.button(f"✅ Not Duplicates", key=f"skip_{i}"):
+                            # Mark as not duplicates in DB
+                            tx_ids = [tx['_id'] for tx in group]
+                            db.mark_as_not_duplicate(tx_ids)
+                            
+                            # Remove from session state
+                            st.session_state["dupe_groups"].pop(i)
                             st.rerun()
                     
+                    # Show each transaction
                     cols = st.columns(len(group))
                     for idx, tx in enumerate(group):
                         with cols[idx]:
-                            st.info(f"**{tx['description']}**\n\n👤 {tx.get('spender')}\n📄 {tx.get('source_file')}")
-                            if st.button("🗑️ Delete Single", key=f"ds_{tx['_id']}"):
-                                db.delete_transaction(tx['_id']); st.rerun()
+                            source_badge = tx.get('source_file', 'Unknown')[:10]
+                            st.info(f"**{tx['description'][:40]}**\n\n👤 {tx.get('spender', 'N/A')}\n📄 {source_badge}")
+                            if st.button("🗑️ Delete", key=f"ds_{tx['_id']}"):
+                                db.delete_transaction(tx['_id'])
+                                # Remove tx from this group in session state
+                                st.session_state["dupe_groups"][i]['transactions'].pop(idx)
+                                # If group is now too small, remove it entirely
+                                if len(st.session_state["dupe_groups"][i]['transactions']) < 2:
+                                    st.session_state["dupe_groups"].pop(i)
+                                st.rerun()
+                    
+                    st.divider()
+                
                 if st.button("Clear Results"):
-                    st.session_state["dupe_groups"] = None; st.rerun()
+                    st.session_state["dupe_groups"] = None
+                    st.rerun()
 
         # Reset
         with st.expander("🗑️ Reset Database (Delete All Data)"):

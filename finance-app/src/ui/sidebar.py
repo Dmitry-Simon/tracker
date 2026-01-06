@@ -31,7 +31,9 @@ def render_sidebar():
     
     # Only show AI Summary for Monthly/Quarterly (cost optimization)
     if view_period in ["Monthly", "Quarterly"]:
-        nav_options = ["Dashboard", "AI Summary", "Data Editor", "Upload Data"]
+        # TODO: Add AI Summary after deteming the purpose of the feature.
+        # nav_options = ["Dashboard", "AI Summary", "Data Editor", "Upload Data"]
+        nav_options = base_views
     else:
         nav_options = base_views
     

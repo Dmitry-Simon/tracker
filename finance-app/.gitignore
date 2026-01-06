@@ -3,6 +3,7 @@
 
 # Test files
 tests/raw-test-data/
+tests/
 *.log
 
 # scripts

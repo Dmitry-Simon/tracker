@@ -429,6 +429,7 @@ class TransactionParser:
             amount_col = None
             debit_credit_col = None
             ref_col = None
+            bank_category_col = None  # סוג פעולה - Bank's transaction type
             
             for col in df.columns:
                 col_str = str(col).strip()
@@ -448,6 +449,8 @@ class TransactionParser:
                     debit_credit_col = col
                 if 'אסמכתא' in col_str:
                     ref_col = col
+                if 'סוג פעולה' in col_str or 'סוג' in col_str and 'פעולה' in col_str:
+                    bank_category_col = col
             
             if not (date_col and desc_col and amount_col):
                 print(f"One Zero Excel: Missing required columns")
@@ -593,6 +596,16 @@ class TransactionParser:
                 if ref_col and pd.notna(row[ref_col]):
                     ref_val = str(row[ref_col]).strip().split('.')[0] # Remove decimal if present (Excel)
                 
+                # 6. Extract Bank Category (סוג פעולה) - helps AI categorization
+                bank_cat_val = None
+                if bank_category_col and pd.notna(row[bank_category_col]):
+                    bank_cat_val = str(row[bank_category_col]).strip()
+                
+                # 7. Extract Debit/Credit type (חיוב/זיכוי) - helps AI understand flow direction
+                tx_type_val = None
+                if debit_credit_col and pd.notna(row[debit_credit_col]):
+                    tx_type_val = str(row[debit_credit_col]).strip()
+                
                 transactions.append({
                     'date': parsed_date,
                     'description': desc_val,
@@ -601,7 +614,9 @@ class TransactionParser:
                     'currency': 'ILS',
                     'source_file': 'OneZero_Excel',
                     'spender': spender,
-                    'ref_id': ref_val
+                    'ref_id': ref_val,
+                    'bank_category': bank_cat_val,  # Original bank categorization (סוג פעולה)
+                    'transaction_type': tx_type_val  # Debit/Credit indicator (חיוב/זיכוי)
                 })
         
         except Exception as e:

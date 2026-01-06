@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from collections import defaultdict
 
+# TODO: reaserch for the best way to implement this, for now it's a placeholder
 def render_ai_summary(filters):
     """
     Renders the AI Summary page with intelligent financial insights.
