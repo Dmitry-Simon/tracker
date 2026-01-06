@@ -157,6 +157,21 @@ def get_recent_transactions(limit=50):
     docs = db.collection('transactions').order_by('date', direction=firestore.Query.DESCENDING).limit(limit).stream()
     return [d.to_dict() for d in docs]
 
+def get_all_transactions():
+    """
+    Fetches ALL transactions from the database.
+    """
+    if MOCK_MODE:
+        try:
+            with open('mock_db.json', 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    db = get_db()
+    docs = db.collection('transactions').stream()
+    return [doc.to_dict() for doc in docs]
+
 def get_transactions_by_range(start_date: str, end_date: str):
     """
     Fetches transactions within a date range (inclusive).
@@ -425,3 +440,53 @@ def get_uncategorized_count():
              return sum(1 for _ in docs)
         except:
              return 0
+
+def get_budget() -> float:
+    """
+    Retrieves the monthly budget limit.
+    """
+    if MOCK_MODE:
+        try:
+            with open('mock_settings.json', 'r') as f:
+                settings = json.load(f)
+            return settings.get('monthly_budget', 0.0)
+        except:
+            return 0.0
+
+    db = get_db()
+    try:
+        doc = db.collection('settings').document('global').get()
+        if doc.exists:
+            return doc.to_dict().get('monthly_budget', 0.0)
+        return 0.0
+    except:
+        return 0.0
+
+def set_budget(amount: float) -> bool:
+    """
+    Sets the monthly budget limit.
+    """
+    if MOCK_MODE:
+        try:
+            settings = {}
+            try:
+                with open('mock_settings.json', 'r') as f:
+                    settings = json.load(f)
+            except:
+                pass # File doesn't exist yet
+            
+            settings['monthly_budget'] = float(amount)
+            
+            with open('mock_settings.json', 'w') as f:
+                json.dump(settings, f, indent=4)
+            return True
+        except:
+            return False
+
+    try:
+        db = get_db()
+        db.collection('settings').document('global').set({'monthly_budget': float(amount)}, merge=True)
+        return True
+    except Exception as e:
+        print(f"Error setting budget: {e}")
+        return False

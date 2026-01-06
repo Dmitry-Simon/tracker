@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 import calendar
+from src import db
 
 def render_sidebar():
     """
@@ -16,44 +17,15 @@ def render_sidebar():
         }
     """
     
-    # Theme Toggle
-    from src.ui import theme_manager
-    current_theme = theme_manager.get_current_theme()
-    
-    # Icon based on NEXT state (e.g. if Light, show Moon to go Dark)
-    btn_label = "🌙 Dark Mode" if current_theme == "light" else "☀️ Light Mode"
-    
-    if st.sidebar.button(btn_label, use_container_width=True):
-        theme_manager.toggle_theme()
-        st.rerun()
-        
-    st.sidebar.divider()
-
     current_year = datetime.now().year
     current_month = datetime.now().month
 
-    # --- 1. Dashboard Settings (Period Type First) ---
-
-    st.sidebar.header("Dashboard Settings")
-    
-    # View Period Selector - Moved up so Navigation can react to it
-    view_period = st.sidebar.pills(
-        "Period Type", 
-        ["Monthly", "Quarterly", "Half Year", "Yearly"],
-        default=st.session_state.get('view_period', 'Monthly'),
-        selection_mode="single",
-        key="period_selector_pills"
-    )
-    if not view_period:
-        view_period = st.session_state.get('view_period', 'Monthly')
-    
-    # Sync with session state immediately
-    st.session_state['view_period'] = view_period
-
-    st.sidebar.divider()
-
-    # --- 2. Main Navigation ---
+    # --- 1. Main Navigation (Moved to Top) ---
     st.sidebar.title("Navigation")
+    
+    # Determine available views based on period (will be updated after period selection, 
+    # but we need to render nav first. We'll use session state for persistence)
+    view_period = st.session_state.get('view_period', 'Monthly')
     
     base_views = ["Dashboard", "Data Editor", "Upload Data"]
     
@@ -72,6 +44,26 @@ def render_sidebar():
     )
     if not selected_view:
         selected_view = "Dashboard"
+
+    st.sidebar.divider()
+
+    # --- 2. Dashboard Settings ---
+
+    st.sidebar.header("Dashboard Settings")
+    
+    # View Period Selector
+    view_period = st.sidebar.pills(
+        "Period Type", 
+        ["Monthly", "Quarterly", "Half Year", "Yearly"],
+        default=view_period,
+        selection_mode="single",
+        key="period_selector_pills"
+    )
+    if not view_period:
+        view_period = st.session_state.get('view_period', 'Monthly')
+    
+    # Sync with session state immediately
+    st.session_state['view_period'] = view_period
 
     st.sidebar.divider()
 
@@ -131,7 +123,28 @@ def render_sidebar():
          if not selected_half:
              selected_half = "H1"
 
-    # --- 3. Logic Calculation ---
+    st.sidebar.divider()
+
+    # --- 4. Budget Settings ---
+    # Load budget from DB
+    current_budget = db.get_budget()
+    
+    def update_budget():
+        new_val = st.session_state.budget_input
+        db.set_budget(new_val)
+        
+    with st.sidebar.expander("💰 Budget Goals", expanded=False):
+        budget_limit = st.number_input(
+            "Monthly Expense Limit (₪)", 
+            min_value=0.0, 
+            value=float(current_budget), 
+            step=500.0, 
+            help="Set a target for your monthly expenses to see progress.",
+            key="budget_input",
+            on_change=update_budget
+        )
+
+    # --- 5. Logic Calculation ---
     if view_period == "Monthly":
         _, last_day = calendar.monthrange(selected_year, selected_month)
         start_date = f"{selected_year}-{selected_month:02d}-01"
@@ -169,7 +182,8 @@ def render_sidebar():
         'end_date': end_date,
         'period_label': period_label,
         'selected_year': selected_year,
-        'selected_month': selected_month
+        'selected_month': selected_month,
+        'budget_limit': budget_limit
     }
 
 

@@ -5,6 +5,12 @@
 tests/raw-test-data/
 *.log
 
+# scripts
+scripts/
+
+# Streamlit cache
+.streamlit/
+
 # Python
 __pycache__/
 *.py[cod]

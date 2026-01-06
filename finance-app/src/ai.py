@@ -52,20 +52,32 @@ def categorize_transactions(transactions: list) -> tuple[list, str]:
         
         prompt = f"""
         You are a financial assistant.
-        1. Categorize these transactions into: [Food, Transport, Shopping, Bills, Salary, Health, Entertainment, Transfer, Rent/Mortgage, Savings].
+        1. Categorize these transactions into: [Food, Groceries, Transport, Shopping, Bills, Salary, Income, Health, Entertainment, Transfer, Rent/Mortgage, Savings].
         2. Clean the merchant name (e.g. "MCDONALDS 889 TLV" -> "McDonald's").
         
         CRITICAL RULES:
         - DO NOT TRANSLATE the description. Keep it in the original language (e.g. Hebrew).
         - If the description is "רמי לוי", keep it "רמי לוי". Do NOT change it to "Rami Levy".
         - Only remove transaction IDs, dates, or city names that clutter the merchant name.
+        - FIX REVERSED HEBREW: If the text looks like reversed Hebrew (e.g. "תרוכשמ" -> "משכורת", "ג\"פוק" -> "קופ\"ג"), REVERSE IT back to readable Hebrew in the 'clean_desc' field.
+        
+        CATEGORY RULES:
+        - "Groceries": Supermarkets (Shufersal, Rami Levy, Osher Ad, Mega, Victory, Yochananof, Tiv Taam, AM:PM, Super, Market, Makolet).
+        - "Food": Restaurants, Cafes, Takeout, Wolt, Ten Bis.
+        - "Income": Salary, Benefits, Interest, Refunds, "Crossix", "Solo", "Citi Bank Crossix".
         
         SAVINGS CATEGORY RULES:
         - Deposits to savings accounts (פיקדון, deposit) -> "Savings"
         - Regular savings orders (הוראת קבע לחיסכון, חיסכון) -> "Savings"
+        - Provident funds/Pensions (קופת גמל, קופ"ג, ג"פוק, תודקפה) -> "Savings"
         - Stock purchases (company names like "Veea Systems", stock tickers) -> "Savings"
-        - Investment contributions -> "Savings"
+        - Investment contributions (Meitav, מיטב, Altshuler, Psagot) -> "Savings"
         - Internal transfers between checking accounts -> "Transfer"
+
+        TRANSFER vs EXPENSE RULES:
+        - "BIT" and "PAYBOX": If description is just "BIT" or "PAYBOX", categorize as "Shopping" (assume expense).
+        - "משיכה מבנקט" (ATM Withdrawal): Categorize as "Shopping" (assume cash spending).
+        - "העברה" (Transfer): If generic, keep as "Transfer".
         
         Return STRICT JSON array of objects: {{"id": "...", "category": "...", "clean_desc": "..."}}.
         NO Markdown. NO Backticks.
