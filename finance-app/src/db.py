@@ -1,5 +1,7 @@
 import hashlib
 import calendar
+import difflib
+from datetime import datetime, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore
 import streamlit as st
@@ -70,6 +72,11 @@ def check_transaction_exists(transaction: dict) -> bool:
     doc = doc_ref.get() 
     return doc.exists
 
+def _clear_transaction_cache():
+    """Clear cached transaction data after mutations."""
+    get_all_transactions.clear()
+    get_transactions_by_range.clear()
+
 def add_transaction(transaction: dict) -> str:
     """
     Adds or updates transaction in Firestore.
@@ -111,7 +118,7 @@ def add_transaction(transaction: dict) -> str:
             with open('mock_db.json', 'w') as f:
                 json.dump(data, f, indent=4)
             return 'added'
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return 'skipped'
 
     db = get_db()
@@ -139,11 +146,12 @@ def add_transaction(transaction: dict) -> str:
             # Update if new value exists and either:
             # 1. Existing value is missing/None, OR
             # 2. Field is 'uploaded_from' and values differ (existing behavior)
-            if new_val and (existing_val is None or field == 'uploaded_from' and existing_val != new_val):
+            if new_val and (existing_val is None or (field == 'uploaded_from' and existing_val != new_val)):
                 updates[field] = new_val
         
         if updates:
             doc_ref.update(updates)
+            _clear_transaction_cache()
             return 'updated'
         else:
             return 'skipped'
@@ -159,6 +167,7 @@ def add_transaction(transaction: dict) -> str:
     data['uploaded_at'] = firestore.SERVER_TIMESTAMP
     
     doc_ref.set(data)
+    _clear_transaction_cache()
     return 'added'
 
 
@@ -168,12 +177,13 @@ def get_recent_transactions(limit=50):
             with open('mock_db.json', 'r') as f:
                 data = json.load(f)
             return sorted(data, key=lambda x: x['date'], reverse=True)[:limit]
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
     db = get_db()
     docs = db.collection('transactions').order_by('date', direction=firestore.Query.DESCENDING).limit(limit).stream()
     return [d.to_dict() for d in docs]
 
+@st.cache_data(ttl=60)
 def get_all_transactions():
     """
     Fetches ALL transactions from the database.
@@ -182,13 +192,14 @@ def get_all_transactions():
         try:
             with open('mock_db.json', 'r') as f:
                 return json.load(f)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
-    
+
     db = get_db()
     docs = db.collection('transactions').stream()
     return [doc.to_dict() for doc in docs]
 
+@st.cache_data(ttl=60)
 def get_transactions_by_range(start_date: str, end_date: str):
     """
     Fetches transactions within a date range (inclusive).
@@ -246,13 +257,14 @@ def update_transaction(transaction_id: str, updates: dict) -> bool:
             with open('mock_db.json', 'w') as f:
                 json.dump(data, f, indent=4)
             return True
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return False
 
     try:
         db = get_db()
         doc_ref = db.collection('transactions').document(transaction_id)
         doc_ref.update(updates)
+        _clear_transaction_cache()
         return True
     except Exception as e:
         print(f"Error updating transaction {transaction_id}: {e}")
@@ -267,7 +279,7 @@ def get_uncategorized_transactions(limit=100):
             with open('mock_db.json', 'r') as f:
                 data = json.load(f)
             return [tx for tx in data if tx.get('category') == 'Uncategorized'][:limit]
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
 
     db = get_db()
@@ -283,6 +295,17 @@ def update_transaction_batch(updates_list: list) -> int:
     updates_list: list of dicts, each must have '_id' and fields to update.
     Returns: count of successfully updated docs.
     """
+    if MOCK_MODE:
+        count = 0
+        for update_data in updates_list:
+            doc_id = update_data.get('_id')
+            if not doc_id:
+                continue
+            clean_update = {k: v for k, v in update_data.items() if k != '_id'}
+            if update_transaction(doc_id, clean_update):
+                count += 1
+        return count
+
     db = get_db()
     batch = db.batch()
     count = 0
@@ -310,12 +333,11 @@ def update_transaction_batch(updates_list: list) -> int:
     if count > 0:
         batch.commit()
         updated_count += count
-        
+
+    if updated_count > 0:
+        _clear_transaction_cache()
     return updated_count
         
-from datetime import datetime, timedelta
-import difflib
-
 def delete_transaction(transaction_id: str) -> bool:
     """
     Deletes a specific transaction from Firestore.
@@ -328,12 +350,13 @@ def delete_transaction(transaction_id: str) -> bool:
             with open('mock_db.json', 'w') as f:
                 json.dump(data, f, indent=4)
             return True
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return False
 
     try:
         db = get_db()
         db.collection('transactions').document(transaction_id).delete()
+        _clear_transaction_cache()
         return True
     except Exception as e:
         print(f"Error deleting transaction {transaction_id}: {e}")
@@ -356,7 +379,7 @@ def find_potential_duplicates():
         try:
             with open('mock_db.json', 'r') as f:
                 transactions = json.load(f)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
     else:
         db = get_db()
@@ -553,7 +576,7 @@ def check_for_near_duplicates(transaction: dict, threshold: float = 0.7) -> list
         dt = datetime.strptime(date, '%Y-%m-%d')
         start = (dt - timedelta(days=3)).strftime('%Y-%m-%d')
         end = (dt + timedelta(days=3)).strftime('%Y-%m-%d')
-    except:
+    except (ValueError, TypeError):
         return []
     
     existing_txs = get_transactions_by_range(start, end)
@@ -591,7 +614,7 @@ def delete_all_transactions():
             with open('mock_db.json', 'w') as f:
                 json.dump([], f)
             return 0 # Or actual count if needed
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return 0
 
     db = get_db()
@@ -609,7 +632,8 @@ def delete_all_transactions():
             
     if count > 0:
         batch.commit()
-        
+
+    _clear_transaction_cache()
     return count
 
 def get_uncategorized_count():
@@ -621,7 +645,7 @@ def get_uncategorized_count():
             with open('mock_db.json', 'r') as f:
                 data = json.load(f)
             return sum(1 for tx in data if tx.get('category') == 'Uncategorized')
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return 0
 
     db = get_db()
@@ -631,12 +655,12 @@ def get_uncategorized_count():
         count_query = query.count()
         results = count_query.get()
         return results[0][0].value
-    except:
+    except Exception:
         # Fallback for older SDKs or if aggregation fails: manual count (slower but safe)
         try:
              docs = db.collection('transactions').where('category', '==', 'Uncategorized').stream()
              return sum(1 for _ in docs)
-        except:
+        except Exception:
              return 0
 
 def get_budget() -> float:
@@ -648,7 +672,7 @@ def get_budget() -> float:
             with open('mock_settings.json', 'r') as f:
                 settings = json.load(f)
             return settings.get('monthly_budget', 0.0)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return 0.0
 
     db = get_db()
@@ -657,7 +681,7 @@ def get_budget() -> float:
         if doc.exists:
             return doc.to_dict().get('monthly_budget', 0.0)
         return 0.0
-    except:
+    except Exception:
         return 0.0
 
 def set_budget(amount: float) -> bool:
@@ -670,7 +694,7 @@ def set_budget(amount: float) -> bool:
             try:
                 with open('mock_settings.json', 'r') as f:
                     settings = json.load(f)
-            except:
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
                 pass # File doesn't exist yet
             
             settings['monthly_budget'] = float(amount)
@@ -678,7 +702,7 @@ def set_budget(amount: float) -> bool:
             with open('mock_settings.json', 'w') as f:
                 json.dump(settings, f, indent=4)
             return True
-        except:
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             return False
 
     try:

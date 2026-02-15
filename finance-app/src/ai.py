@@ -3,12 +3,20 @@ import streamlit as st
 import json
 import time
 from src import db
+from src.constants import AI_MODELS, IGNORE_CATS_EXPENSE, get_ai_context
 
-# Configure API Key (Global try, but we also check in function)
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-    genai.configure(api_key=st.secrets["gemini"]["api_key"])
+def _get_api_key():
+    """Retrieve Gemini API key from Streamlit secrets."""
+    if "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
+        return st.secrets["gemini"]["api_key"]
+    return None
+
+# Configure API Key on import
+_key = _get_api_key()
+if _key:
+    genai.configure(api_key=_key)
 
 def categorize_transactions(transactions: list) -> tuple[list, str]:
     """
@@ -27,12 +35,8 @@ def categorize_transactions(transactions: list) -> tuple[list, str]:
     # Model Selection Strategy
     # User requested "Gemini 3 Flash".
     # We try: 3.0 Flash -> 2.0 Flash -> 1.5 Flash
-    models_to_try = [
-        'gemini-3-flash-preview',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-flash'
-    ]
-    
+    models_to_try = AI_MODELS
+
     # Start with primary
     current_model_name = models_to_try[0]
     model = genai.GenerativeModel(current_model_name)
@@ -109,7 +113,7 @@ def categorize_transactions(transactions: list) -> tuple[list, str]:
                 # Safe fallback logging
                 try:
                     st.toast(f"Model {current_model_name} failed. Trying fallbacks...", icon="⚠️")
-                except:
+                except Exception:
                     pass
                 
                 success_fallback = False
@@ -158,16 +162,9 @@ def enrich_uncategorized_data():
     Returns: (count, error_message)
     """
     # 1. Get API Key
-    api_key = None
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-        api_key = st.secrets["gemini"]["api_key"]
-        
+    api_key = _get_api_key()
     if not api_key:
         return 0, "Missing GEMINI_API_KEY or [gemini] api_key in secrets.toml"
-
-    # Re-configure to be safe
     genai.configure(api_key=api_key)
 
     # 2. Fetch Data
@@ -279,23 +276,13 @@ def generate_financial_summary(transactions: list, period_label: str, filters: d
         }, None
     
     # Get API Key
-    api_key = None
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-        api_key = st.secrets["gemini"]["api_key"]
-        
+    api_key = _get_api_key()
     if not api_key:
         return {}, "Missing GEMINI_API_KEY in secrets.toml"
-    
     genai.configure(api_key=api_key)
     
     # Model Selection Strategy - Gemini 3 Flash with fallbacks
-    models_to_try = [
-        'gemini-3-flash-preview',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-flash'
-    ]
+    models_to_try = AI_MODELS
     
     # Prepare summary data
     import statistics
@@ -330,7 +317,7 @@ def generate_financial_summary(transactions: list, period_label: str, filters: d
             }
     
     # Category breakdown (Align with dashboard.py - exclude IGNORE_CATS and Savings)
-    IGNORE_CATS = ['Credit Card Payoff', 'Savings']
+    IGNORE_CATS = IGNORE_CATS_EXPENSE
     by_category = defaultdict(lambda: {'total': 0, 'count': 0})
     for t in transactions:
         cat = t.get('category', 'Uncategorized')
@@ -375,9 +362,10 @@ def generate_financial_summary(transactions: list, period_label: str, filters: d
         tx_list_str += f"\n... and {len(transactions) - 50} more transactions"
     
     # Build prompt
+    ai_context = get_ai_context()
+    context_line = f"\nContext: {ai_context}" if ai_context else ""
     prompt_parts = [
-        f"""You are a personal financial advisor analyzing spending for {period_label}.
-Context: You are advising a couple, Yaara (a student) and Dmitry (a software engineer), who live in Kiryat Ono, Israel.
+        f"""You are a personal financial advisor analyzing spending for {period_label}.{context_line}
 
 Current Period Data Summary:
 - Total Income: ₪{total_income:.2f}
@@ -416,7 +404,7 @@ Tasks:
 2. {"Compare current period with previous period and highlight significant changes" if prev_period_data else "Analyze the unusual expenses and explain why they might be significant"}
 3. Review each major spending category and provide brief commentary
 4. Suggest 3-5 actionable recommendations to improve financial health{"based on the trends observed" if prev_period_data else ""}
-5. Add a clever joke at the end about their data and their personalities (Dmitry the dev, Yaara the student, living in Kiryat Ono).
+5. Add a clever joke at the end about their financial data.
 
 CRITICAL RULES:
 - Be conversational and helpful, not robotic

@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
 import plotly.express as px
 from src import db
+from src.constants import IGNORE_CATS_EXPENSE
 import src.ui.styles as styles
 from collections import defaultdict
 
@@ -92,7 +92,7 @@ def render_dashboard(filters):
     # Prepare Data for Charts
     # We want to include Savings in the breakdown now -> REVERTED: User wants charts to match "Total Expenses" KPI
     # So we must EXCLUDE Savings from these charts.
-    IGNORE_CATS = ['Credit Card Payoff', 'Transfer', 'Savings']
+    IGNORE_CATS = IGNORE_CATS_EXPENSE
     df_expenses = df[(df['amount'] < 0) & (~df['category'].isin(IGNORE_CATS))].copy()
     
     # --- Row 1: Category Analysis (Ported from AI Summary style) ---

@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime
+from src.constants import INCOME_CATEGORIES, SAVINGS_CATEGORIES, IGNORE_CATS_METRIC
 
 def calculate_metrics(transactions):
     """
@@ -23,10 +24,7 @@ def calculate_metrics(transactions):
     df = pd.DataFrame(transactions)
     df['amount'] = pd.to_numeric(df['amount'])
     
-    # Define categories
-    INCOME_CATEGORIES = ['Salary', 'Income', 'Benefits', 'Interest']
-    IGNORE_CATS = ['Credit Card Payoff', 'Transfer']
-    SAVINGS_CATEGORIES = ['Savings']
+    IGNORE_CATS = IGNORE_CATS_METRIC
     
     # Calculate Income
     income = df[df['category'].isin(INCOME_CATEGORIES)]['amount'].sum()
@@ -75,10 +73,7 @@ def calculate_category_averages(transactions, period_type='Monthly'):
     df['amount'] = pd.to_numeric(df['amount'])
     df['date'] = pd.to_datetime(df['date'])
     
-    # Filter for expenses only and exclude ignored categories
-    # Filter for expenses only and exclude ignored categories
-    # We include Savings now to track average savings
-    IGNORE_CATS = ['Credit Card Payoff', 'Transfer', 'Income', 'Salary', 'Benefits', 'Interest']
+    IGNORE_CATS = IGNORE_CATS_METRIC + INCOME_CATEGORIES
     df_expenses = df[
         (df['amount'] < 0) & 
         (~df['category'].isin(IGNORE_CATS))

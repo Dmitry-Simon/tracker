@@ -1,20 +1,14 @@
 import pdfplumber
 import pandas as pd
 import re
-import hashlib
-import io
 from datetime import datetime
 from src import db  # Import db to use the exact same hash function
+from src.constants import get_card_patterns
 
 class TransactionParser:
     def __init__(self, default_spender="Joint"):
         self.default_spender = default_spender
-        # Card pattern mapping: card_number -> spender_name
-        self.card_patterns = {
-            '1973': 'Yaara',
-            '0164': 'Dmitry',
-            '7317': 'Dmitry'
-        }
+        self.card_patterns = get_card_patterns()
     
     def detect_spender(self, description):
         """
@@ -121,7 +115,7 @@ class TransactionParser:
             
         try:
             return float(s)
-        except:
+        except (ValueError, TypeError):
             return 0.0
 
     def parse_file(self, file_obj, filename):
@@ -160,7 +154,7 @@ class TransactionParser:
                 # Try reading as CSV first
                 try:
                     df_temp = pd.read_csv(file_obj, header=None, names=list(range(30)), encoding='utf-8')
-                except:
+                except Exception:
                     file_obj.seek(0)
                     df_temp = pd.read_excel(file_obj, header=None)
                 
@@ -248,7 +242,8 @@ class TransactionParser:
                     # We will try to infer from data if map is empty/incomplete.
                     
                     # Iterate Data Rows
-                    start_row = row_idx + 1 if headers else 0
+                    row_idx = row_idx if headers else -1
+                    start_row = row_idx + 1
                     
                     for i in range(start_row, len(table)):
                         row = table[i]
@@ -478,7 +473,7 @@ class TransactionParser:
                             # Convert Excel serial to datetime
                             dt = pd.to_datetime(date_val, unit='D', origin='1899-12-30')
                             parsed_date = dt.strftime('%Y-%m-%d')
-                        except:
+                        except (ValueError, TypeError):
                             pass
                     else:
                         # Try parsing as string
@@ -660,7 +655,7 @@ class TransactionParser:
                 sheet_transactions = self._parse_max_finance_sheet(file_obj, sheet_name)
                 all_transactions.extend(sheet_transactions)
                 
-        except:
+        except Exception:
             # Not an Excel file, try CSV
             file_obj.seek(0)
             all_transactions = self._parse_max_finance_sheet(file_obj, sheet_name=None)
@@ -690,10 +685,10 @@ class TransactionParser:
                 try:
                     file_obj.seek(0)
                     df_raw = pd.read_csv(file_obj, header=None, names=list(range(30)), encoding='utf-8')
-                except:
+                except Exception:
                     file_obj.seek(0)
                     df_raw = pd.read_csv(file_obj, header=None, names=list(range(30)), encoding='iso-8859-8')
-                
+
             header_idx = -1
             for idx, row in df_raw.iterrows():
                 row_str = " ".join(row.astype(str).values)
@@ -712,7 +707,7 @@ class TransactionParser:
                 file_obj.seek(0)
                 try:
                     df = pd.read_csv(file_obj, skiprows=header_idx, encoding='utf-8')
-                except:
+                except Exception:
                     file_obj.seek(0)
                     df = pd.read_csv(file_obj, skiprows=header_idx, encoding='iso-8859-8')
                 
@@ -781,11 +776,11 @@ class TransactionParser:
         try:
             file_obj.seek(0)
             df_raw = pd.read_csv(file_obj, header=None, names=list(range(30)), encoding='utf-8')
-        except:
+        except Exception:
             file_obj.seek(0)
             try:
                 df_raw = pd.read_csv(file_obj, header=None, names=list(range(30)), encoding='iso-8859-8')
-            except:
+            except Exception:
                 file_obj.seek(0)
                 df_raw = pd.read_excel(file_obj, header=None)
 
@@ -949,9 +944,9 @@ class TransactionParser:
                             val = self.clean_amount(a)
                             if abs(val) > 0.01:
                                 valid_amounts.append(val)
-                        except:
+                        except (ValueError, TypeError):
                             pass
-                            
+
                     if not valid_amounts: continue
                     
                     # Heuristic: The Billing Amount is usually the first number in LTR or last in RTL?
@@ -1019,8 +1014,11 @@ class TransactionParser:
                     # But if we reversed chars, ')' became ')' char at start.
                     # Let's leave parens for now, usually minor.
 
-                    # Expense assumption
-                    final_amount = -1 * abs(amount)
+                    # Amount: negative source values are refunds (make positive)
+                    if amount < 0:
+                        final_amount = abs(amount)
+                    else:
+                        final_amount = -1 * abs(amount)
 
                     parsed_date = self.parse_date(date_str)
                     

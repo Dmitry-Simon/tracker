@@ -1,5 +1,5 @@
 import streamlit as st
-from src.ui import sidebar, dashboard, data_editor, upload, ai_assistant, ai_summary, styles
+from src.ui import sidebar, dashboard, data_editor, upload, ai_summary, styles
 
 st.set_page_config(page_title="Finance Tracker", layout="wide", page_icon="💸")
 

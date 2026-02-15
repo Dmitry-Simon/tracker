@@ -252,7 +252,7 @@ import contextlib
 
 @contextlib.contextmanager
 def card(class_name=""):
-    st.markdown(f'<div class="premium-glass-card {class_name}">', unsafe_allow_html=True)
+    st.markdown(f'<div class="app-glass-frame {class_name}">', unsafe_allow_html=True)
     yield
     st.markdown('</div>', unsafe_allow_html=True)
 

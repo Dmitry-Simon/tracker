@@ -45,7 +45,7 @@ def toggle_theme():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 config = toml.load(f)
-        except:
+        except Exception:
             pass
     
     # Update [theme] section

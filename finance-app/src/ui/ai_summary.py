@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from src import db, ai
+from src.constants import IGNORE_CATS_EXPENSE
 import plotly.express as px
-import plotly.graph_objects as go
 from collections import defaultdict
 
 # TODO: reaserch for the best way to implement this, for now it's a placeholder
@@ -156,7 +157,7 @@ def render_ai_summary(filters):
     
     with col_left:
         # Category spending chart (Align with dashboard.py - exclude IGNORE_CATS)
-        IGNORE_CATS = ['Credit Card Payoff']
+        IGNORE_CATS = IGNORE_CATS_EXPENSE
         by_category = defaultdict(float)
         for t in transactions:
             if t['amount'] < 0:  # Expenses only
@@ -217,9 +218,6 @@ def render_ai_summary(filters):
         st.session_state['force_ai_refresh'] = True
         st.rerun()
 
-from datetime import datetime
-
-
 
 def _render_basic_stats(transactions):
     """Fallback: Render basic statistics when AI fails."""
@@ -237,4 +235,4 @@ def _render_basic_stats(transactions):
     
     st.markdown("**Top Spending Categories:**")
     for cat, data in sorted_cats[:5]:
-        st.markdown(f"- **{cat}**: ${data['total']:,.2f} ({data['count']} transactions)")
+        st.markdown(f"- **{cat}**: ₪{data['total']:,.2f} ({data['count']} transactions)")

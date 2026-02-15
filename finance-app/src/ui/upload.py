@@ -81,31 +81,57 @@ def render_upload():
                 
                 parse_progress.progress((file_idx + 1) / len(uploaded_files))
             
-            # Check each transaction for exact and near duplicates
+            # Batch duplicate checking: fetch date range once instead of N queries
             check_progress = st.progress(0, text="Checking for duplicates...")
+
+            # Determine date range of all uploaded transactions
+            dates = [tx['date'] for tx in all_transactions if tx.get('date')]
+            if dates:
+                from datetime import datetime, timedelta
+                min_date = min(dates)
+                max_date = max(dates)
+                # Expand range by 3 days for near-duplicate detection
+                try:
+                    start_dt = datetime.strptime(min_date, '%Y-%m-%d') - timedelta(days=3)
+                    end_dt = datetime.strptime(max_date, '%Y-%m-%d') + timedelta(days=3)
+                    existing_txs = db.get_transactions_by_range(
+                        start_dt.strftime('%Y-%m-%d'),
+                        end_dt.strftime('%Y-%m-%d')
+                    )
+                except (ValueError, TypeError):
+                    existing_txs = []
+            else:
+                existing_txs = []
+
+            # Build hash set for exact duplicate checking
+            existing_hashes = set()
+            existing_by_id = {}
+            for etx in existing_txs:
+                if '_id' in etx:
+                    existing_hashes.add(etx['_id'])
+                    existing_by_id[etx['_id']] = etx
+
             for i, tx in enumerate(all_transactions):
-                # Check for EXACT duplicate (same hash already in DB)
-                is_exact_dupe = db.check_transaction_exists(tx)
-                
-                if is_exact_dupe:
-                    # Check if this duplicate can be enriched with new fields
-                    can_enrich = _check_can_enrich(tx)
-                    if can_enrich:
-                        # Track as "enrichable" - will be updated with new metadata
-                        exact_duplicates.append({'tx': tx, 'enrichable': True})
-                    else:
-                        exact_duplicates.append({'tx': tx, 'enrichable': False})
+                # Generate hash for this transaction
+                tx_hash = db.generate_hash_id(
+                    tx['date'], tx['amount'], tx['description'], tx.get('ref_id')
+                )
+
+                if tx_hash in existing_hashes:
+                    # Exact duplicate - check if enrichable
+                    can_enrich = _check_can_enrich_local(tx, existing_by_id.get(tx_hash))
+                    exact_duplicates.append({'tx': tx, 'enrichable': can_enrich})
                 else:
-                    # Check for NEAR duplicates (similar but not exact)
-                    near_dupes = db.check_for_near_duplicates(tx, threshold=0.75)
-                    if near_dupes:
+                    # Check for near duplicates against pre-fetched data
+                    near_matches = _check_near_duplicates_local(tx, existing_txs, threshold=0.75)
+                    if near_matches:
                         near_duplicates.append({
                             'new_tx': tx,
-                            'matches': near_dupes
+                            'matches': near_matches
                         })
                     else:
                         truly_new.append(tx)
-                
+
                 check_progress.progress((i + 1) / len(all_transactions))
             
             # Save to session state
@@ -251,50 +277,6 @@ def render_upload():
                 st.rerun()
 
 
-def _insert_transactions(transactions: list, skip_duplicates: bool = False, duplicates: list = None):
-    """
-    Helper function to insert transactions into the database.
-    """
-    added, updated, skipped = 0, 0, 0
-    
-    # Build skip set if needed
-    skip_set = set()
-    if skip_duplicates and duplicates:
-        for warn in duplicates:
-            tx = warn['new_tx']
-            skip_key = f"{tx['date']}_{tx['amount']}_{tx['description']}"
-            skip_set.add(skip_key)
-    
-    progress = st.progress(0, text="Inserting transactions...")
-    
-    for i, tx in enumerate(transactions):
-        tx_key = f"{tx['date']}_{tx['amount']}_{tx['description']}"
-        
-        # Clean up internal tracking field
-        tx.pop('_source_file', None)
-        
-        if tx_key in skip_set:
-            skipped += 1
-        else:
-            status = db.add_transaction(tx)
-            if status == 'added':
-                added += 1
-            elif status == 'updated':
-                updated += 1
-            else:
-                skipped += 1
-        
-        progress.progress((i + 1) / len(transactions))
-    
-    # Save results and transition to done phase
-    st.session_state["upload_results"] = {
-        'added': added,
-        'updated': updated,
-        'skipped': skipped
-    }
-    st.session_state["upload_phase"] = "done"
-    st.rerun()
-
 
 def _reset_upload_state():
     """Reset all upload-related session state."""
@@ -346,38 +328,37 @@ def _insert_transactions_direct(transactions: list):
     st.rerun()
 
 
-def _check_can_enrich(tx: dict) -> bool:
+def _check_can_enrich_local(new_tx: dict, existing_tx: dict) -> bool:
     """
-    Check if an existing transaction in the DB can be enriched with new metadata
-    from this transaction (e.g., bank_category, transaction_type, spender).
+    Check if an existing transaction can be enriched with new metadata
+    using pre-fetched data (no extra DB call).
     """
-    # Generate hash to find existing doc
-    hash_id = db.generate_hash_id(
-        tx['date'],
-        tx['amount'],
-        tx['description'],
-        tx.get('ref_id')
-    )
-    
-    firestore_db = db.get_db()
-    if not firestore_db:
+    if not existing_tx:
         return False
-        
-    doc = firestore_db.collection('transactions').document(hash_id).get()
-    if not doc.exists:
-        return False
-    
-    existing_data = doc.to_dict()
-    
-    # Check enrichable fields
+
     enrichable_fields = ['bank_category', 'transaction_type', 'spender']
-    
     for field in enrichable_fields:
-        new_val = tx.get(field)
-        existing_val = existing_data.get(field)
-        
-        # If new value exists and existing is missing, can enrich
+        new_val = new_tx.get(field)
+        existing_val = existing_tx.get(field)
         if new_val and existing_val is None:
             return True
-    
     return False
+
+
+def _check_near_duplicates_local(transaction: dict, existing_txs: list, threshold: float = 0.75) -> list:
+    """
+    Check for near-duplicates against a pre-fetched list of existing transactions.
+    Returns list of matches in the same format as db.check_for_near_duplicates.
+    """
+    matches = []
+    for existing in existing_txs:
+        confidence, reason = db.calculate_duplicate_confidence(transaction, existing)
+        if confidence >= threshold:
+            matches.append({
+                'existing': existing,
+                'confidence': confidence,
+                'reason': reason
+            })
+
+    matches.sort(key=lambda x: x['confidence'], reverse=True)
+    return matches

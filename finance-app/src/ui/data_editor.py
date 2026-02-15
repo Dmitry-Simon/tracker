@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import time
 from src import db
+from src.constants import ALL_CATEGORIES, get_spender_options
 from src.ui import styles
 
 def render_data_editor(filters):
@@ -42,11 +43,7 @@ def render_data_editor(filters):
                     "amount": st.column_config.NumberColumn("Amount", format="₪%.2f"),
                     "category": st.column_config.SelectboxColumn(
                         "Category",
-                        options=[
-                            "Food", "Transport", "Shopping", "Bills", 
-                            "Salary", "Health", "Entertainment", 
-                            "Transfer", "Rent/Mortgage", "Uncategorized", "Groceries", "Restaurants", "Credit Card Payoff", "Other"
-                        ],
+                        options=ALL_CATEGORIES,
                         required=True
                     )
                 }
@@ -96,7 +93,7 @@ def render_data_editor(filters):
                         "source_file": st.column_config.TextColumn("Source", width="small"),
                         "uploaded_from": st.column_config.TextColumn("File", width="small"),
                         "description": st.column_config.TextColumn("Description", width="large"),
-                        "spender": st.column_config.SelectboxColumn("Owner", options=["Joint", "Dmitry", "Yaara"], required=True)
+                        "spender": st.column_config.SelectboxColumn("Owner", options=get_spender_options(), required=True)
                     },
                     hide_index=True
                 )
@@ -260,6 +257,12 @@ def render_data_editor(filters):
         # Reset
         with st.expander("🗑️ Reset Database (Delete All Data)"):
             st.error("This will permanently wipe all transactions!")
-            if st.button("🔥 WIPE DATABASE", type="primary"):
+            confirm_text = st.text_input(
+                "Type DELETE to confirm:",
+                key="wipe_confirm",
+                placeholder="Type DELETE here..."
+            )
+            wipe_disabled = confirm_text != "DELETE"
+            if st.button("🔥 WIPE DATABASE", type="primary", disabled=wipe_disabled):
                 db.delete_all_transactions()
                 st.success("Wiped!"); time.sleep(1); st.rerun()
