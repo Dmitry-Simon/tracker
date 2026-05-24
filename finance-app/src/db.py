@@ -554,8 +554,8 @@ def is_bank_cc_overlap(tx1: dict, tx2: dict) -> str:
     Checks if two transactions represent Bank + Credit Card overlap.
     Returns descriptive string if true, None otherwise.
     """
-    bank_sources = ['OneZero_Table', 'OneZero_Excel', 'OneZero_Scraper']
-    cc_sources = ['Isracard', 'Max_Card', 'Isracard_PDF_Fixed', 'Isracard_Scraper']
+    bank_sources = ['OneZero_Table', 'OneZero_Excel']
+    cc_sources = ['Isracard', 'Max_Card', 'Isracard_PDF_Fixed']
     
     src1 = tx1.get('source_file', '')
     src2 = tx2.get('source_file', '')

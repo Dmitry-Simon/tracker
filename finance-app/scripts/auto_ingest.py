@@ -1,28 +1,27 @@
-"""Headless auto-ingest pipeline.
+"""Headless ingest pipeline.
 
-Flow:
-  1. Spawn Node scraper (scrape/scrape.js) which writes JSON files to scrape/inbox/.
-  2. Adapt scraper-JSON -> internal schema.
-  3. Dedupe each candidate against existing DB rows in a +-3-day window:
+Consumes statement files dropped in scrape/inbox/ (Isracard .xlsx via chrome-devtools
+export, OneZero .xls via app export) and runs the full ingest flow:
+
+  1. Parse each file in scrape/inbox/ (.xlsx, .xls, .csv, .pdf, .json).
+  2. Dedupe each candidate against existing DB rows in a +-3-day window:
        - exact hash match: enrich-or-skip
        - ref_id-equality with same amount: hard override -> skipped as dupe
        - confidence >= 0.85: skipped as high-confidence dupe
        - 0.75 <= confidence < 0.85: skipped as uncertain (per user policy)
        - else: insert
-  4. Loop AI categorization (5 iterations max) to drain the uncategorized backlog.
-  5. Archive processed JSON files. Update state/last_run.json.
-  6. Email summary (or failure) via src.notify.
+  3. Loop AI categorization (5 iterations max) to drain the uncategorized backlog.
+  4. Archive processed files to scrape/inbox/processed/. Update state/last_run.json.
+  5. Email/Telegram summary (or failure) via src.notify.
 
 Flags:
-  --dry-run        do everything except DB writes and email send
-  --skip-scrape    consume existing files in scrape/inbox/ without spawning Node
+  --dry-run        do everything except DB writes and notification send
 """
 import argparse
 import glob
 import json
 import os
 import shutil
-import subprocess
 import sys
 import traceback
 from datetime import date, datetime, timedelta, timezone
@@ -31,14 +30,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src import adapters, db  # noqa: E402
+from src import db, parsers  # noqa: E402
 from src.ai import enrich_uncategorized_data  # noqa: E402
 
 INBOX = ROOT / "scrape" / "inbox"
 PROCESSED = INBOX / "processed"
 STATE = ROOT / "state"
 LOGS = ROOT / "logs"
-SCRAPE_DIR = ROOT / "scrape"
 LOCK = STATE / ".running"
 
 UNCERTAIN_LOW = 0.75
@@ -117,53 +115,18 @@ def _check_near_dupe(tx: dict):
     return best if best > 0 else None
 
 
-def _run_scrape(log: dict) -> int:
-    if not SCRAPE_DIR.exists():
-        log["errors"].append("scrape/ directory missing — skipping scrape step")
-        return 0
-    INBOX.mkdir(parents=True, exist_ok=True)
-    try:
-        r = subprocess.run(
-            ["node", "scrape.js", str(INBOX), str(STATE)],
-            cwd=str(SCRAPE_DIR),
-            capture_output=True, text=True, timeout=600,
-        )
-    except FileNotFoundError:
-        log["errors"].append("node not found on PATH — install Node.js or use --skip-scrape")
-        return 1
-    except subprocess.TimeoutExpired:
-        log["errors"].append("scraper timed out after 600s")
-        return 1
-
-    log["scrape_exit"] = r.returncode
-    log["scrape_stdout_tail"] = (r.stdout or "")[-2000:]
-    log["scrape_stderr_tail"] = (r.stderr or "")[-2000:]
-    return r.returncode
-
-
 def _ingest_file(path: Path, log: dict, dry_run: bool):
-    """Process one file. Supports two formats:
-      - *.json: scraper output (see adapters.adapt)
-      - *.xlsx / *.xls / *.csv / *.pdf: bank statement, parsed by parsers.detect_and_parse
-    """
+    """Parse one statement file via the same parser used by the Streamlit upload UI."""
     suffix = path.suffix.lower()
-    if suffix == ".json":
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        src = doc.get("source", path.stem)
-        txs = adapters.adapt(doc)
-    elif suffix in (".xlsx", ".xls", ".csv", ".pdf"):
-        # Use the existing tracker parser (same path the Streamlit upload UI uses).
-        from src import parsers
-        with path.open("rb") as f:
-            txs = parsers.detect_and_parse(f, path.name)
-        # Tag everything with `uploaded_from` so we can trace it back to this run
-        for tx in txs:
-            tx.setdefault("uploaded_from", f"auto:{path.name}")
-        # Group by source_file value (e.g. "Isracard", "OneZero_Excel")
-        src = txs[0].get("source_file", path.stem) if txs else path.stem
-    else:
+    if suffix not in (".xlsx", ".xls", ".csv", ".pdf"):
         log["errors"].append(f"unsupported file type: {path.name}")
         return
+
+    with path.open("rb") as f:
+        txs = parsers.detect_and_parse(f, path.name)
+    for tx in txs:
+        tx.setdefault("uploaded_from", f"auto:{path.name}")
+    src = txs[0].get("source_file", path.stem) if txs else path.stem
 
     log["by_source"].setdefault(src, {"candidates": 0, "added": 0, "updated": 0,
                                       "skipped_dupe": 0, "skipped_uncertain": 0})
@@ -258,9 +221,7 @@ def _update_state(log: dict):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true",
-                    help="do everything except DB writes and email send")
-    ap.add_argument("--skip-scrape", action="store_true",
-                    help="consume existing files in scrape/inbox/ without spawning Node")
+                    help="do everything except DB writes and notification send")
     args = ap.parse_args()
 
     if not _acquire_lock():
@@ -278,17 +239,6 @@ def main():
     }
 
     try:
-        if not args.skip_scrape:
-            rc = _run_scrape(log)
-            if rc == 1:
-                # config / fatal — abort before touching DB
-                raise RuntimeError(
-                    f"scraper fatal exit (rc=1). stderr: {log.get('scrape_stderr_tail','')}"
-                )
-            # rc 0 = ok; 42 = OneZero OTP needed (partial success); 43/44 = per-source failures
-            if rc in (42, 43, 44):
-                log["errors"].append(f"scraper exit {rc} — partial success; continuing with whatever JSON landed")
-
         candidate_files = []
         for ext in ("*.json", "*.xlsx", "*.xls", "*.csv", "*.pdf"):
             candidate_files.extend(glob.glob(str(INBOX / ext)))
