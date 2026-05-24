@@ -2,16 +2,13 @@ import google.generativeai as genai
 import streamlit as st
 import json
 import time
-from src import db
+from src import db, config
 from src.constants import AI_MODELS, IGNORE_CATS_EXPENSE, get_ai_context
 
+
 def _get_api_key():
-    """Retrieve Gemini API key from Streamlit secrets."""
-    if "GEMINI_API_KEY" in st.secrets:
-        return st.secrets["GEMINI_API_KEY"]
-    elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-        return st.secrets["gemini"]["api_key"]
-    return None
+    """Retrieve Gemini API key via the unified config (Streamlit secrets or env)."""
+    return config.gemini_api_key()
 
 # Configure API Key on import
 _key = _get_api_key()

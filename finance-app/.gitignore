@@ -1,16 +1,9 @@
 # Streamlit secrets (contains sensitive API keys and credentials)
 .streamlit/secrets.toml
 
-# Test files
+# Test fixtures (large binary statement samples — kept local-only)
 tests/raw-test-data/
-tests/
 *.log
-
-# scripts
-scripts/
-
-# Streamlit cache
-.streamlit/
 
 # Python
 __pycache__/
@@ -21,3 +14,14 @@ env/
 venv/
 *.local
 
+# Local-only state (NOT for git)
+mock_db.json
+.env
+state/
+logs/
+
+# Scrape inbox/state (statement files dropped here for ingest; gitignored)
+scrape/.env
+scrape/inbox/
+scrape/state/
+scrape/logs/

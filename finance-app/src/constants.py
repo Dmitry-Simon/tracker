@@ -1,20 +1,12 @@
 # Centralized constants for the Finance Tracker application.
 # All category definitions and model configs live here to ensure consistency.
 
-import streamlit as st
+from src import config
 
-# --- User Profile (loaded from secrets, with empty defaults) ---
+
 def _get_user_profile():
-    """Load user profile from st.secrets[user_profile] if available."""
-    try:
-        profile = st.secrets.get("user_profile", {})
-        return {
-            'card_patterns': dict(profile.get("card_patterns", {})),
-            'spender_names': list(profile.get("spender_names", ["Joint"])),
-            'context': str(profile.get("context", "")),
-        }
-    except Exception:
-        return {'card_patterns': {}, 'spender_names': ["Joint"], 'context': ""}
+    """Load user profile via the unified config (Streamlit secrets or env)."""
+    return config.user_profile()
 
 def get_card_patterns() -> dict:
     """Returns card_number -> spender_name mapping from secrets."""
@@ -49,9 +41,9 @@ def get_spender_options() -> list:
     return names
 
 AI_MODELS = [
+    'gemini-3.1-flash-lite-preview',
     'gemini-3-flash-preview',
     'gemini-2.0-flash-exp',
-    'gemini-1.5-flash'
 ]
 
 AI_CATEGORY_LIST = [

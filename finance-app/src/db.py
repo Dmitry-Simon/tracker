@@ -8,27 +8,43 @@ import streamlit as st
 import json
 import re
 
-# Initialize Firebase app (singleton)
+from src import config
+
 MOCK_MODE = False
-if not firebase_admin._apps:
-    # Use secrets for credentials
-    if "gcp_service_account" in st.secrets:
-        cred_dict = dict(st.secrets["gcp_service_account"])
-        # Fix private key newline issue if present
+_FIREBASE_INIT_TRIED = False
+
+
+def _init_firebase():
+    """Idempotent Firebase init. Sets MOCK_MODE if creds are unavailable."""
+    global MOCK_MODE, _FIREBASE_INIT_TRIED
+    if _FIREBASE_INIT_TRIED:
+        return
+    _FIREBASE_INIT_TRIED = True
+    if firebase_admin._apps:
+        return
+    sa = config.gcp_service_account()
+    if sa:
+        cred_dict = dict(sa)
         if "private_key" in cred_dict:
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
-            
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(credentials.Certificate(cred_dict))
     else:
-        # Fallback to Mock Mode if no secrets found
-        print("Warning: No secrets found for Firebase. Switching to MOCK_MODE.")
+        print("Warning: No Firebase service-account creds found. Switching to MOCK_MODE.")
         MOCK_MODE = True
 
+
 def get_db():
+    _init_firebase()
     if MOCK_MODE:
         return None
     return firestore.client()
+
+
+# Eager init under Streamlit (preserves prior behavior — UI modules may read MOCK_MODE
+# at import time). Lazy init when headless so `from src import db` doesn't crash if
+# secrets aren't available yet.
+if config.in_streamlit():
+    _init_firebase()
 
 def normalize_description(description: str) -> str:
     """Lowercase string, strip whitespace, remove multiple spaces."""
@@ -73,9 +89,11 @@ def check_transaction_exists(transaction: dict) -> bool:
     return doc.exists
 
 def _clear_transaction_cache():
-    """Clear cached transaction data after mutations."""
-    get_all_transactions.clear()
-    get_transactions_by_range.clear()
+    """Clear cached transaction data after mutations. No-op if cache is the
+    headless passthrough (no .clear method)."""
+    for fn in (get_all_transactions, get_transactions_by_range):
+        if hasattr(fn, 'clear'):
+            fn.clear()
 
 def add_transaction(transaction: dict) -> str:
     """
@@ -183,7 +201,7 @@ def get_recent_transactions(limit=50):
     docs = db.collection('transactions').order_by('date', direction=firestore.Query.DESCENDING).limit(limit).stream()
     return [d.to_dict() for d in docs]
 
-@st.cache_data(ttl=60)
+@config.cached(ttl=60)
 def get_all_transactions():
     """
     Fetches ALL transactions from the database.
@@ -199,7 +217,7 @@ def get_all_transactions():
     docs = db.collection('transactions').stream()
     return [doc.to_dict() for doc in docs]
 
-@st.cache_data(ttl=60)
+@config.cached(ttl=60)
 def get_transactions_by_range(start_date: str, end_date: str):
     """
     Fetches transactions within a date range (inclusive).
@@ -536,8 +554,8 @@ def is_bank_cc_overlap(tx1: dict, tx2: dict) -> str:
     Checks if two transactions represent Bank + Credit Card overlap.
     Returns descriptive string if true, None otherwise.
     """
-    bank_sources = ['OneZero_Table', 'OneZero_Excel']
-    cc_sources = ['Isracard', 'Max_Card', 'Isracard_PDF_Fixed']
+    bank_sources = ['OneZero_Table', 'OneZero_Excel', 'OneZero_Scraper']
+    cc_sources = ['Isracard', 'Max_Card', 'Isracard_PDF_Fixed', 'Isracard_Scraper']
     
     src1 = tx1.get('source_file', '')
     src2 = tx2.get('source_file', '')
