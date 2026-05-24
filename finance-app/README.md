@@ -57,10 +57,13 @@ python -m venv .venv
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ```
 
-> If you get an execution policy error on PowerShell, run:
+> The `.\` prefix is required — without it PowerShell tries to load `.venv` as a
+> module name and fails with `The module '.venv' could not be loaded`.
+>
+> If you get an execution policy error, run once per user:
 > `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
 ### 3. Install Dependencies
@@ -130,9 +133,13 @@ No manual collection setup is needed — they are created on first use.
 
 ## Running the App
 
+> All commands below run from the `finance-app/` directory. If you opened a
+> fresh terminal at the repo root, start with `cd finance-app`.
+
 ### macOS / Linux
 
 ```bash
+cd finance-app
 source .venv/bin/activate
 streamlit run main.py
 ```
@@ -140,6 +147,7 @@ streamlit run main.py
 ### Windows (Command Prompt)
 
 ```cmd
+cd finance-app
 .venv\Scripts\activate.bat
 streamlit run main.py
 ```
@@ -147,7 +155,8 @@ streamlit run main.py
 ### Windows (PowerShell)
 
 ```powershell
-.venv\Scripts\Activate.ps1
+cd finance-app
+.\.venv\Scripts\Activate.ps1
 streamlit run main.py
 ```
 
