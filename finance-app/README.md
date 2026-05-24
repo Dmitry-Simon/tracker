@@ -187,33 +187,57 @@ In the app dashboard on Streamlit Cloud you can also configure:
 
 ## Project Structure
 
+For the deep tour (data flow diagrams, module map, the auto-ingest pipeline,
+data model, how to add a new bank), see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```
 finance-app/
-├── main.py                  # App entry point
-├── requirements.txt         # Python dependencies
-├── mock_db.json             # Local mock database (dev/testing)
+├── main.py                  # Streamlit entry point
+├── ARCHITECTURE.md          # How the code is organized + data flow
+├── requirements.txt
+├── .env.example             # Template for headless pipeline secrets
 ├── .streamlit/
-│   ├── config.toml          # Streamlit theme and server config
-│   └── secrets.toml         # Credentials (not committed)
-├── src/
-│   ├── db.py                # Firestore integration and data models
-│   ├── ai.py                # Gemini AI integration
-│   ├── auth.py              # Optional password authentication
-│   ├── parsers.py           # Bank statement parsing (PDF/Excel)
-│   ├── utils.py             # Metric calculations and helpers
-│   ├── ai_summary_cache.py  # AI summary caching
-│   └── ui/
-│       ├── sidebar.py       # Navigation and period filters
-│       ├── dashboard.py     # Dashboard view with charts
-│       ├── data_editor.py   # Transaction editing
-│       ├── upload.py        # File upload with duplicate detection
-│       ├── ai_assistant.py  # AI chat interface
-│       ├── ai_summary.py    # AI financial reports
-│       ├── styles.py        # Custom CSS
-│       └── theme_manager.py # Dark/light mode toggle
-├── scripts/                 # Maintenance and data migration scripts
-└── tests/                   # Test suite
+│   ├── config.toml
+│   └── secrets.toml         # Firebase + Gemini creds (gitignored)
+├── scripts/
+│   ├── auto_ingest.py       # Headless ingest pipeline
+│   ├── run_auto_ingest.bat  # Windows Task Scheduler wrapper
+│   └── install_task.ps1     # One-time scheduler registration
+├── scrape/
+│   └── inbox/               # Drop bank statement files here for ingest
+└── src/
+    ├── config.py            # Unified secrets loader (Streamlit OR env)
+    ├── constants.py         # CATEGORIES, SPENDER_NAMES, AI_MODELS
+    ├── db.py                # Firestore + dedup + hash IDs
+    ├── ai.py                # Gemini integration
+    ├── notify.py            # SMTP + Telegram run summaries
+    ├── auth.py              # Optional password gate
+    ├── utils.py             # Metric helpers
+    ├── ai_summary_cache.py
+    ├── parsers/             # Per-bank statement parsers (see ARCHITECTURE.md)
+    │   ├── __init__.py      #   TransactionParser, detect_and_parse, router
+    │   ├── _base.py         #   Shared utilities
+    │   ├── _one_zero.py
+    │   ├── _isracard.py
+    │   └── _max_card.py
+    └── ui/                  # Streamlit views (dashboard, upload, AI, …)
 ```
+
+## Auto-ingest pipeline
+
+In addition to the Streamlit upload UI, the project ships a headless ingest
+that consumes any statement file dropped into `scrape/inbox/` and runs the
+full dedupe → insert → AI-categorize → notify cycle. See
+[ARCHITECTURE.md](ARCHITECTURE.md#flow-2--auto-ingest-headless) for the flow
+diagram. To trigger a one-off refresh:
+
+```bash
+# drop .xlsx / .xls / .pdf statement files into scrape/inbox/
+python scripts/auto_ingest.py
+```
+
+To install it as a daily scheduled task on Windows, run
+`scripts/install_task.ps1` once (elevated).
 
 ## Troubleshooting
 
